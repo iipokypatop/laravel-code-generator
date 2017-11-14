@@ -2,13 +2,14 @@
 
 namespace CrestApps\CodeGenerator\Commands;
 
-use Illuminate\Console\Command;
-use CrestApps\CodeGenerator\Support\Helpers;
 use CrestApps\CodeGenerator\Models\Label;
-use CrestApps\CodeGenerator\Traits\CommonCommand;
-use CrestApps\CodeGenerator\Support\CrestAppsTranslator;
+use CrestApps\CodeGenerator\Models\Resource;
 use CrestApps\CodeGenerator\Support\Config;
+use CrestApps\CodeGenerator\Support\CrestAppsTranslator;
+use CrestApps\CodeGenerator\Support\Helpers;
 use CrestApps\CodeGenerator\Support\ViewLabelsGenerator;
+use CrestApps\CodeGenerator\Traits\CommonCommand;
+use Illuminate\Console\Command;
 
 class CreateLanguageCommand extends Command
 {
@@ -21,10 +22,10 @@ class CreateLanguageCommand extends Command
      */
     protected $signature = 'create:language
                             {model-name : The model name.}
-                            {--language-file-name= : The name of the file to save the messages in.}
-                            {--fields= : The fields for the form.}
-                            {--fields-file= : File name to import fields from.}
-                            {--template-name= : The template name to use when generating the code.}';
+                            {--language-filename= : The name of the file to save the messages in.}
+                            {--resource-file= : The name of the resource-file to import from.}
+                            {--template-name= : The template name to use when generating the code.}
+                            {--force : This option will override the language file(s) if any already exists.}';
 
     /**
      * The console command description.
@@ -41,9 +42,10 @@ class CreateLanguageCommand extends Command
     public function handle()
     {
         $input = $this->getCommandInput();
-        $fields = $this->getFields($input->fields, $input->fileName, $input->fieldsFile);
-        $languages = Helpers::getLanguageItems($fields);
-        $viewLabels = new ViewLabelsGenerator($input->modelName, $this->isCollectiveTemplate());
+        $resources = Resource::fromFile($input->resourceFile, $input->fileName);
+
+        $languages = Helpers::getLanguageItems($resources->fields);
+        $viewLabels = new ViewLabelsGenerator($input->modelName, $resources->fields, $this->isCollectiveTemplate());
 
         $standardLabels = $viewLabels->getTranslatedLabels(array_keys($languages));
 
@@ -54,11 +56,14 @@ class CreateLanguageCommand extends Command
 
         foreach ($languages as $language => $labels) {
             $file = $this->getDestenationFile($language, $input->fileName);
+
             $messagesToRegister = [];
             $phrases = $this->getLangPhrases($labels, $messagesToRegister);
 
-            $this->addMessagesToFile($file, $phrases, $language)
-                 ->registerMessages($messagesToRegister, $language);
+            if (!empty($phrases)) {
+                $this->addMessagesToFile($file, $phrases, $language)
+                    ->registerMessages($messagesToRegister, $language);
+            }
         }
     }
 
@@ -114,7 +119,7 @@ class CreateLanguageCommand extends Command
      */
     protected function getTranslator()
     {
-        if (! Helpers::isNewerThan('5.3')) {
+        if (!Helpers::isNewerThanOrEqualTo()) {
             return CrestAppsTranslator::getTranslator();
         }
 
@@ -132,17 +137,12 @@ class CreateLanguageCommand extends Command
      */
     protected function addMessagesToFile($fileFullname, $messages, $language)
     {
-        if (empty($messages)) {
-            $this->info('There was no messages to add the language files');
-            return $this;
+        if (!$this->isFileExists($fileFullname) || $this->option('force')) {
+            $this->createMessageToFile($fileFullname, $messages, $language);
+        } else {
+            $this->appendMessageToFile($fileFullname, $messages);
         }
 
-        if ($this->isFileExists($fileFullname)) {
-            $this->appendMessageToFile($fileFullname, $messages);
-        } else {
-            $this->createMessageToFile($fileFullname, $messages, $language);
-        }
-        
         return $this;
     }
 
@@ -167,7 +167,7 @@ class CreateLanguageCommand extends Command
         $newContent = substr_replace($content, PHP_EOL . $messages, $index + 1, 1);
 
         $this->putContentInFile($fileFullname, $newContent)
-             ->info('New messages were added to the [' . $baseFile . '] file');
+            ->info('New messages were added to the [' . $baseFile . '] file');
     }
 
     /**
@@ -196,11 +196,10 @@ class CreateLanguageCommand extends Command
     protected function createMessageToFile($fileFullname, $messages, $language)
     {
         $stub = $this->getStubContent('language');
-
         $this->replaceFieldName($stub, $messages)
-             ->createFile($fileFullname, $stub);
+            ->createFile($fileFullname, $stub);
 
-        $this->info('The file  [' . $language . '/' . basename($fileFullname) . '] was created successfully.');
+        $this->info('The file "' . $language . '/' . basename($fileFullname) . '" was crafted successfully.');
     }
 
     /**
@@ -223,12 +222,16 @@ class CreateLanguageCommand extends Command
     protected function getCommandInput()
     {
         $modelName = trim($this->argument('model-name'));
-        $fileName = trim($this->option('language-file-name')) ?: Helpers::makeLocaleGroup($modelName);
-        $fields = trim($this->option('fields'));
-        $fieldsFile = trim($this->option('fields-file')) ?: Helpers::makeJsonFileName($modelName);
+        $fileName = trim($this->option('language-filename')) ?: Helpers::makeLocaleGroup($modelName);
+        $resourceFile = trim($this->option('resource-file')) ?: Helpers::makeJsonFileName($modelName);
         $template = trim($this->option('template-name'));
 
-        return (object) compact('modelName', 'fileName', 'fields', 'fieldsFile', 'template');
+        return (object) compact(
+            'modelName',
+            'fileName',
+            'resourceFile',
+            'template'
+        );
     }
 
     /**
@@ -239,18 +242,18 @@ class CreateLanguageCommand extends Command
      *
      * @return string
      */
-    protected function getLangPhrases(array $labels, array & $messagesToRegister)
+    protected function getLangPhrases(array $labels, array &$messagesToRegister)
     {
         $messages = [];
 
         foreach ($labels as $label) {
-            if (! $this->isMessageExists($label->localeGroup, $label->lang)) {
+            if (!$this->isMessageExists($label->localeGroup, $label->lang) || $this->option('force')) {
                 $messages[] = $this->getMessage($label);
                 $messagesToRegister[$label->localeGroup] = $label->text;
             }
         }
 
-        $glue =  "," . PHP_EOL;
+        $glue = "," . PHP_EOL;
 
         return !isset($messages[0]) ? '' : implode($glue, $messages) . $glue;
     }
@@ -277,8 +280,6 @@ class CreateLanguageCommand extends Command
      */
     protected function replaceFieldName(&$stub, $messages)
     {
-        $stub = $this->strReplace('messages', $messages, $stub);
-
-        return $this;
+        return $this->replaceTemplate('messages', $messages, $stub);
     }
 }

@@ -2,35 +2,16 @@
 
 namespace CrestApps\CodeGenerator\Support;
 
-use Exception;
-use App;
-use CrestApps\CodeGenerator\Support\Helpers;
-use CrestApps\CodeGenerator\Support\FieldsOptimizer;
 use CrestApps\CodeGenerator\Models\Field;
-use CrestApps\CodeGenerator\Models\Label;
 use CrestApps\CodeGenerator\Models\FieldMapper;
-use CrestApps\CodeGenerator\Models\ForeignRelationship;
-use CrestApps\CodeGenerator\Models\ForeignConstraint;
+use CrestApps\CodeGenerator\Support\FieldsOptimizer;
 use CrestApps\CodeGenerator\Traits\CommonCommand;
-use CrestApps\CodeGenerator\Support\Config;
+use CrestApps\CodeGenerator\Traits\GeneratorReplacers;
+use Exception;
 
 class FieldTransformer
 {
-    use CommonCommand;
-    
-    /**
-     * The raw field before transformation
-     *
-     * @var array
-     */
-    protected $rawFields = [];
-
-    /**
-     * The field after transformation
-     *
-     * @var array
-     */
-    protected $fields = [];
+    use CommonCommand, GeneratorReplacers;
 
     /**
      * The name of the file where labels will reside
@@ -40,119 +21,107 @@ class FieldTransformer
     protected $localeGroup;
 
     /**
-     * Mapps the user input to a valid property name in the field object
+     * When the read only flag is set the predefine functionality is disabled
      *
-     * @return array
-    */
-    protected $predefinedKeyMapping =
-    [
-        'html-type'         => 'htmlType',
-        'html-value'        => 'htmlValue',
-        'value'             => [
-                                    'dataValue',
-                                    'htmlValue'
-                               ],
-        'is-on-views'       => [
-                                    'isOnIndexView',
-                                    'isOnFormView',
-                                    'isOnShowView'
-                               ],
-        'is-on-index'       => 'isOnIndexView',
-        'is-on-form'        => 'isOnFormView',
-        'is-on-show'        => 'isOnShowView',
-        'data-value'        => 'dataValue',
-        'is-primary'        => 'isPrimary',
-        'is-index'          => 'isIndex',
-        'is-unique'         => 'isUnique',
-        'comment'           => 'comment',
-        'is-nullable'       => 'isNullable',
-        'is-auto-increment' => 'isAutoIncrement',
-        'is-inline-options' => 'isInlineOptions',
-        'delimiter'         => 'optionsDelimiter',
-        'is-header'         => 'isHeader',
-        'class'             => 'cssClass',
-        'css-class'         => 'cssClass',
-        'date-format'       => 'dateFormat',
-        'cast-as'           => 'castAs',
-        'cast'              => 'castAs',
-        'is-date'           => 'isDate',
-    ];
-
-    /**
-     * Array of the valid html-types
-     *
-     * @return array
-    */
-    protected $validHtmlTypes = [
-                        'text',
-                        'password',
-                        'email',
-                        'file',
-                        'checkbox',
-                        'radio',
-                        'number',
-                        //'date',
-                        'select',
-                        'multipleSelect',
-                        'textarea',
-                        'selectMonth',
-                        'selectRange',
-                    ];
-
-    /**
-     * List of data types that would make a field unsigned.
-     *
-     * @return array
-    */
-    protected $unsignedTypes = [
-        'bigIncrements',
-        'bigInteger',
-        'increments',
-        'mediumIncrements',
-        'smallIncrements',
-        'unsignedBigInteger',
-        'unsignedInteger',
-        'unsignedMediumInteger',
-        'unsignedSmallInteger',
-        'unsignedTinyInteger'
-    ];
-
-    /**
-     * The apps default language
-     *
-     * @var string
+     * @var bool
      */
-    protected $defaultLang;
+    protected $isReadOnly = false;
 
     /**
-     * Create a new transformer instance.
+     * The field after transformation
      *
-     * @return void
+     * @var array
      */
-    protected function __construct($properties, $localeGroup)
+    protected $fields = [];
+
+    /**
+     * The raw field before transformation
+     *
+     * @var array
+     */
+    protected $rawFields = [];
+
+    /**
+     * The languages
+     *
+     * @var array
+     */
+    protected $languages = [];
+
+    /**
+     * It transfres a gining array to a collection of field
+     *
+     * @param array $collection
+     * @param string $localeGroup
+     * @param array $languages
+     * @param bool $isReadOnly
+     *
+     * @return array
+     */
+    public static function fromArray(array $collection, $localeGroup, array $languages = [], $isReadOnly = false)
     {
-        if (empty($localeGroup)) {
-            throw new Exception("$localeGroup must have a valid value");
-        }
+        $transformer = new self($collection, $localeGroup, $languages, $isReadOnly);
 
-        $this->rawFields = is_array($properties) ? $properties : $this->parseRawString($properties);
-        $this->localeGroup = $localeGroup;
-        $this->defaultLang = App::getLocale();
+        return $transformer->transfer()->getFields();
     }
 
     /**
-     * It transfred a gining string to a collection of field
+     * It transfres a gining array to a collection of field
      *
-     * @param string $fieldsString
+     * @param string $str
      * @param string $localeGroup
+     * @param array $languages
+     * @param bool $isReadOnly
      *
-     * @return array Support\Field
-    */
-    public static function fromText($fieldsString, $localeGroup)
+     * @return array
+     */
+    public static function fromString($str, $localeGroup = 'generic', array $languages = [], $isReadOnly = false)
     {
-        $transformer = new self($fieldsString, $localeGroup);
+        // The following are the expected two formats
+        // a,b,c
+        // OR
+        // name:a;html-type:select;options:first|second|third|fourth
+        $fields = [];
+        $fieldNames = array_unique(Helpers::convertStringToArray($str));
+        foreach ($fieldNames as $fieldName) {
+            $field = [];
 
-        return $transformer->transfer()->getFields();
+            if (str_contains($fieldName, ':')) {
+                // Handle the following format
+                // name:a;html-type:select;options:first|second|third|fourth
+                if (!str_is('*name*:*', $fieldName)) {
+                    throw new Exception('The "name" property was not provided and is required!');
+                }
+
+                $parts = Helpers::convertStringToArray($fieldName, ';');
+
+                foreach ($parts as $part) {
+                    if (!str_is('*:*', $part) || count($properties = Helpers::convertStringToArray($part, ':')) < 2) {
+                        throw new Exception('Each provided property should use the following format "key:value"');
+                    }
+                    list($key, $value) = $properties;
+                    $field[$key] = $value;
+                    if ($key == 'options') {
+                        $options = Helpers::convertStringToArray($value, '|');
+
+                        if (count($options) == 0) {
+                            throw new Exception('You must provide at least one option where each option is seperated by "|".');
+                        }
+
+                        $field['options'] = [];
+                        foreach ($options as $option) {
+                            $field['options'][$option] = $option;
+                        }
+                    }
+                }
+            } else {
+                $field['name'] = $fieldName;
+            }
+
+            $fields[] = $field;
+        }
+
+        return self::fromArray($fields, $localeGroup, $languages, $isReadOnly);
     }
 
     /**
@@ -162,1077 +131,290 @@ class FieldTransformer
      * @param string $localeGroup
      *
      * @return array
-    */
-    public static function fromJson($json, $localeGroup)
+     */
+    public static function fromJson($json, $localeGroupm, array $languages = [])
     {
         if (empty($json) || ($fields = json_decode($json, true)) === null) {
             throw new Exception("The provided string is not a valid json.");
         }
 
-        $transformer = new self($fields, $localeGroup);
+        $transformer = new self($fields, $localeGroup, $languages);
 
         return $transformer->transfer()->getFields();
     }
 
     /**
-     * It transfres a gining array to a collection of field
+     * Create a new transformer instance.
      *
-     * @param array $collection
+     * @param array $properties
      * @param string $localeGroup
-     *
-     * @return array
-    */
-    public static function fromArray(array $collection, $localeGroup)
-    {
-        $transformer = new self($collection, $localeGroup);
-
-        return $transformer->transfer()->getFields();
-    }
-
-    /**
-     * It transfres the raw fields into Fields by setting the $this->fields array
-     *
-     * @return $this
-    */
-    protected function transfer()
-    {
-        $finalFields = [];
-
-        $this->validateFields($this->rawFields);
-
-        foreach ($this->rawFields as $rawField) {
-            $finalFields[] = $this->transferField($rawField);
-        }
-
-        $optimizer = new FieldsOptimizer($finalFields);
-        $this->fields = $optimizer->optimize()->getFields();
-
-        return $this;
-    }
-
-    /**
-     * It transfres a giving array to a field object by matching predefined keys
-     *
-     * @param array $field
-     * @param string $localeGroup
-     *
-     * @return array
-    */
-    protected function transferField(array $properties)
-    {
-        if (!$this->isKeyExists($properties, 'name') || empty(Helpers::removeNonEnglishChars($properties['name']))) {
-            throw new Exception("The field 'name' was not provided!");
-        }
-
-        $field = new Field(Helpers::removeNonEnglishChars($properties['name']));
-
-        $properties = $this->getProperties($properties);
-
-        $this->setPredefindProperties($field, $properties)
-             ->setDataType($field, $properties)
-             ->setOptionsProperty($field, $properties)
-             ->setLabelsProperty($field, $properties)
-             ->setDataTypeParams($field, $properties)
-             ->setMultipleAnswers($field, $properties)
-             ->setUnsignedProperty($field, $properties)
-             ->setValidationProperty($field, $properties)
-             ->setForeignRelation($field, $properties)
-             ->setPlaceholder($field, $properties) // this must come after setForeignRelation
-             ->setRange($field, $properties)
-             ->setForeignConstraint($field, $properties);
-
-        self::setOnStore($field, $properties);
-        self::setOnUpdate($field, $properties);
-
-        if ($this->isValidSelectRangeType($properties)) {
-            $field->htmlType = 'selectRange';
-        }
-
-        if ($field->dataType == 'enum' && empty($field->getOptions())) {
-            throw new Exception('To construct an enum data-type field, options must be set. ' . $field->name);
-        }
-
-        return new FieldMapper($field, $properties);
-    }
-
-   /**
-     * Get the properties after applying the predefined keys.
-     *
-     * @param array $properties
-     *
-     * @return array
-    */
-    protected function getProperties(array $properties)
-    {
-        if (!$this->isValidHtmlType($properties)) {
-            unset($properties['html-type']);
-        }
-
-        $definitions = Config::getCommonDefinitions();
-
-        foreach ($definitions as $definition) {
-            $patterns = $this->isKeyExists($definition, 'match') ? (array) $definition['match'] : [];
-            $configs = $this->isKeyExists($definition, 'set') ? (array) $definition['set'] : [];
-
-            if (Helpers::strIs($patterns, $properties['name'])) {
-                //auto add any config from the master config
-                foreach ($configs as $key => $config) {
-                    if (!$this->isKeyExists($properties, $key)) {
-                        $properties[$key] = $config;
-                    }
-                }
-            }
-        }
-
-        return $properties;
-    }
-
-   /**
-     * Checks if a field contains a valid html-type name
-     *
-     * @param array $properties
-     *
-     * @return bool
-    */
-    protected function isValidHtmlType(array $properties)
-    {
-        return $this->isKeyExists($properties, 'html-type') &&
-        (
-             in_array($properties['html-type'], $this->validHtmlTypes)
-          || $this->isValidSelectRangeType($properties)
-        );
-    }
-
-    /**
-     * Validates the giving properties.
-     *
-     * @param array $properties
      *
      * @return void
      */
-    protected function validateFields(array $properties)
+    protected function __construct(array $properties, $localeGroup, array $languages = [], $isReadOnly = false)
     {
-        $names = array_column($properties, 'name');
-        $un = array_unique($names);
-
-        if (array_unique($names) !== $names) {
-            throw new Exception('Each field name must be unique. Please check the profided field names');
-        }
-    }
-
-    /**
-     * Checks if a properties contains a valid "selectRange" html-type element.
-     *
-     * @param array $properties
-     *
-     * @return bool
-     */
-    protected function isValidSelectRangeType(array $properties)
-    {
-        return $this->isKeyExists($properties, 'html-type') && starts_with($properties['html-type'], 'selectRange|');
-    }
-
-   /**
-     * Checks if a key exists in a giving array
-     *
-     * @param array $properties
-     * @param string $name
-     *
-     * @return bool
-    */
-    protected function isKeyExists(array $properties, ...$name)
-    {
-        $exists = false;
-        $args = func_get_args();
-
-        for ($i = 1; $i < count($args); $i++) {
-            if (!array_key_exists($args[$i], $properties)) {
-                return false;
-            }
+        if (empty($localeGroup)) {
+            throw new Exception('LocaleGroup must have a valid value.');
         }
 
-        return true;
-    }
-
-    /**
-     * Sets the dataType for a giving field
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return $this
-    */
-    protected function setDataType(Field & $field, array $properties)
-    {
-        $map = Config::dataTypeMap();
-
-        if ($this->isKeyExists($properties, 'data-type') && $this->isKeyExists($map, $properties['data-type'])) {
-            $field->dataType = $map[$properties['data-type']];
-        }
-
-        return $this;
-    }
-
-    /**
-     * Sets the range for a giving field
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return $this
-    */
-    protected function setRange(Field & $field, array $properties)
-    {
-        if ($this->isValidSelectRangeType($properties)) {
-            $field->range = explode(':', substr($properties['html-type'], 12));
-        }
-
-        if ($this->isKeyExists($properties, 'range') && is_array($properties['range'])) {
-            $field->range = $properties['range'];
-        }
-        
-        return $this;
-    }
-
-    /**
-     * Sets the raw php command to execute on create.
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return void
-    */
-    protected static function setOnStore(Field & $field, array $properties)
-    {
-        if (array_key_exists('on-store', $properties)) {
-            $field->onStore = self::getOnAction($properties['on-store']);
-        }
-    }
-
-    /**
-     * Sets the raw php command to execute on update.
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return void
-    */
-    protected static function setOnUpdate(Field & $field, array $properties)
-    {
-        if (array_key_exists('on-update', $properties)) {
-            $field->onUpdate = self::getOnAction($properties['on-update']);
-        }
-    }
-
-    /**
-    * Cleans up a giving action
-    *
-    * @param string $action
-    *
-    * @return string
-    */
-    protected static function getOnAction($action)
-    {
-        $action = trim($action);
-
-        if (empty($action)) {
-            return null;
-        }
-
-        return Helpers::postFixWith($action, ';');
-    }
-
-    /**
-     * Sets the DataTypeParam for a giving field
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return $this
-    */
-    protected function setDataTypeParams(Field & $field, array $properties)
-    {
-        if ($this->isKeyExists($properties, 'data-type-params') && is_array($properties['data-type-params'])) {
-            $field->methodParams = $this->getDataTypeParams($field->dataType, (array) $properties['data-type-params']);
-        }
-
-        return $this;
-    }
-
-    /**
-     * Gets the data type parameters for the giving type.
-     *
-     * @param string $type
-     * @param array $params
-     *
-     * @return $this
-    */
-    protected function getDataTypeParams($type, array $params)
-    {
-        if (in_array($type, ['char','string']) && isset($params[0]) && ($length = intval($params[0])) > 0) {
-            return [$length];
-        }
-
-        if (in_array($type, ['decimal','double','float']) && isset($params[0]) && ($length = intval($params[0])) > 0 && isset($params[1]) && ($decimal = intval($params[1])) > 0) {
-            return [$length, $decimal];
-        }
-
-        if ($type == 'enum') {
-            return $params;
-        }
-        
-
-        return [];
-    }
-
-    /**
-     * Sets the isMultipleAnswers for a giving field
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     *
-     * @return $this
-    */
-    protected function setMultipleAnswers(Field & $field)
-    {
-        if (in_array($field->htmlType, ['checkbox','multipleSelect']) && !$field->isBoolean()) {
-            $field->isMultipleAnswers = true;
-        }
-
-        return $this;
-    }
-
-    /**
-     * Sets the isUnsigned for a giving field
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return $this
-    */
-    protected function setUnsignedProperty(Field & $field, array $properties)
-    {
-        $field->isUnsigned = $this->isUnsigned($field, $properties);
-
-        return $this;
-    }
-
-    /**
-     * Sets the foreign relations for a giving field
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return $this
-    */
-    protected function setForeignRelation(Field & $field, array $properties)
-    {
-        if ($this->isKeyExists($properties, 'is-foreign-relation') && ! $properties['is-foreign-relation']) {
-            return $this;
-        }
-
-        if ($this->isKeyExists($properties, 'foreign-relation')) {
-            $relation = self::makeForeignRelation($field, (array)$properties['foreign-relation']);
-        } else {
-            $relation = self::getPredectableForeignRelation($field, $this->getModelsPath());
-        }
-
-        $field->setForeignRelation($relation);
-
-        return $this;
-    }
-
-    /**
-     * Gets the model full path.
-     *
-     * @return string
-    */
-    protected function getModelsPath()
-    {
-        return $this->getAppNamespace() . Config::getModelsPath();
-    }
-
-    /**
-     * Sets the foreign key for a giving field
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return $this
-    */
-    protected function setForeignConstraint(Field & $field, array $properties)
-    {
-        $foreignConstraint = $this->getForeignConstraint($properties);
-
-        $field->setForeignConstraint($foreignConstraint);
-
-        if ($field->hasForeignConstraint() && ! $field->hasForeignRelation()) {
-            $field->setForeignRelation($foreignConstraint->getForeignRelation());
-        }
-
-        return $this;
-    }
-
-    /**
-     * Get the foreign constraints
-     *
-     * @param array $properties
-     *
-     * @return null || CrestApps\CodeGenerator\Models\ForeignConstraint
-    */
-    protected function getForeignConstraint(array $properties)
-    {
-        if ($this->hasForeignConstraint($properties)) {
-            $constraint = $properties['foreign-constraint'];
-            $onUpdate = $this->isKeyExists($constraint, 'on-update') ? $constraint['on-update'] : null;
-            $onDelete = $this->isKeyExists($constraint, 'on-delete') ? $constraint['on-delete'] : null;
-            $modelPath = $this->getModelsPath();
-            $model = $this->isKeyExists($constraint, 'references-model') ? $constraint['references-model'] :
-            self::guessModelFullName($properties['name'], $modelPath);
-
-            return new ForeignConstraint($constraint['field'], $constraint['references'], $constraint['on'], $onDelete, $onUpdate, $model);
-        }
-
-        return null;
-    }
-
-    /**
-     * Check if giving properties contains a valid foreign key object
-     *
-     * @param array $properties
-     *
-     * @return bool
-     */
-    protected function hasForeignConstraint(array $properties)
-    {
-        return  $this->isKeyExists($properties, 'foreign-constraint')
-                && is_array($properties['foreign-constraint'])
-                && $this->isKeyExists($properties['foreign-constraint'], 'field', 'references', 'on');
-    }
-
-    /**
-     * Get a foreign relationship from giving array
-     *
-     * @param array $options
-     *
-     * @return null | CrestApps\CodeGenerator\Model\ForeignRelationship
-     */
-    protected static function getForeignRelation(array $options)
-    {
-        if (!array_key_exists('type', $options) || !array_key_exists('params', $options)|| !array_key_exists('name', $options)) {
-            return null;
-        }
-        
-        $field = array_key_exists('field', $options) ? $options['field'] : null;
-
-        return new ForeignRelationship(
-                                $options['type'],
-                                $options['params'],
-                                $options['name'],
-                                $field
-                            );
-    }
-
-    /**
-     * Get a predictable foreign relation using the giving field's name
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param string $modelPath
-     *
-     * @return null | CrestApps\CodeGenerator\Model\ForeignRelationship
-     */
-    public static function getPredectableForeignRelation(Field & $field, $modelPath)
-    {
-        $patterns = Config::getKeyPatterns();
-
-        if (Helpers::strIs($patterns, $field->name)) {
-            $relationName = camel_case(self::extractModelName($field->name));
-            $model = self::guessModelFullName($field->name, $modelPath);
-            $parameters = [$model, $field->name];
-
-            return new ForeignRelationship('belongsTo', $parameters, $relationName);
-        }
-
-        return null;
-    }
-
-    /**
-     * Gets a foreign relation from a giving properties.
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param string $modelPath
-     *
-     * @return CrestApps\CodeGenerator\Model\ForeignRelationship
-     */
-    public static function makeForeignRelation(Field & $field, array $properties)
-    {
-        $relation = self::getForeignRelation($properties);
-
-        if (!is_null($relation)) {
-            self::setOnStore($field, $properties);
-            self::setOnUpdate($field, $properties);
-        }
-
-        return $relation;
-    }
-
-    /**
-     * Guesses the model full name using the giving field's name
-     *
-     * @param string $name
-     * @param string $modelsPath
-     *
-     * @return string
-     */
-    public static function guessModelFullName($name, $modelsPath)
-    {
-        $model = $modelsPath . ucfirst(self::extractModelName($name));
-
-        return Helpers::convertSlashToBackslash($model);
-    }
-
-    /**
-     * Extracts the model name from the giving field's name.
-     *
-     * @param string $name
-     *
-     * @return string
-     */
-    public static function extractModelName($name)
-    {
-        return ucfirst(studly_case(str_replace('_id', '', $name)));
-    }
-
-    /**
-     * Checks if a field should be unsigned or not.
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return bool
-    */
-    protected function isUnsigned(Field & $field, array $properties)
-    {
-        return ($this->isKeyExists($properties, 'is-unsigned') && $properties['is-unsigned'])
-              || in_array($field->dataType, $this->unsignedTypes);
-    }
-
-    /**
-     * It set the labels property for a giving field
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return $this
-    */
-    protected function setLabelsProperty(Field & $field, array $properties)
-    {
-        $labels = $this->getLabels($properties);
-
-        foreach ($labels as $label) {
-            $field->addLabel($label->text, $this->localeGroup, $label->isPlain, $label->lang);
-        }
-
-        return $this;
-    }
-
-    /**
-     * It set the validationRules property for a giving field
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return $this
-    */
-    protected function setValidationProperty(Field & $field, array $properties)
-    {
-        if ($this->isKeyExists($properties, 'validation')) {
-            $field->validationRules = is_array($properties['validation']) ? $properties['validation'] : Helpers::removeEmptyItems(explode('|', $properties['validation']));
-        }
-
-        if (Helpers::isNewerThan('5.2') && $field->isNullable && !in_array('nullable', $field->validationRules)) {
-            $field->validationRules[] = 'nullable';
-        }
-
-        if ($field->isBoolean() && !in_array('boolean', $field->validationRules)) {
-            $field->validationRules[] = 'boolean';
-        }
-
-        if ($field->isFile() && !in_array('file', $field->validationRules)) {
-            $field->validationRules[] = 'file';
-        }
-        if ($field->isMultipleAnswers && !in_array('array', $field->validationRules)) {
-            $field->validationRules[] = 'array';
-        }
-
-        if (in_array($field->dataType, ['char','string']) && in_array($field->htmlType, ['text','textarea'])) {
-            if (!in_array('string', $field->validationRules)) {
-                $field->validationRules[] = 'string';
-            }
-
-            if (!$this->inArraySearch($field->validationRules, 'min')) {
-                $field->validationRules[] = sprintf('min:%s', $field->getMinLength());
-            }
-
-            if (!$this->inArraySearch($field->validationRules, 'max') && !is_null($field->getMaxLength())) {
-                $field->validationRules[] = sprintf('max:%s', $field->getMaxLength());
-            }
-        }
-
-        $params = [];
-
-        if ($this->isKeyExists($properties, 'data-type-params')) {
-            $params = $this->getDataTypeParams($field->dataType, (array) $properties['data-type-params']);
-        }
-
-        if ($field->htmlType == 'number' || (in_array($field->dataType, ['decimal','double','float'])
-            && isset($params[0]) && ($length = intval($params[0])) > 0
-            && isset($params[1]) && ($decimal = intval($params[1])) > 0)) {
-            if (!in_array('numeric', $field->validationRules)) {
-                $field->validationRules[] = 'numeric';
-            }
-
-            if (!$this->inArraySearch($field->validationRules, 'min') && !is_null($minValue = $field->getMinValue())) {
-                $field->validationRules[] = sprintf('min:%s', $minValue);
-            }
-
-            if (!$this->inArraySearch($field->validationRules, 'max') && !is_null($maxValue = $field->getMaxValue())) {
-                $field->validationRules[] = sprintf('max:%s', $maxValue);
-            }
-        }
-
-        return $this;
-    }
-
-    /**
-     * It set the placeholder property for a giving field
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return $this
-    */
-    protected function setPlaceholder(Field & $field, array $properties)
-    {
-        $labels = $this->getPlaceholder($field, $properties);
-
-        foreach ($labels as $label) {
-            $field->addPlaceholder($label->text, $this->localeGroup, $label->isPlain, $label->lang);
-        }
-
-        return $this;
-    }
-
-    /**
-     * Checks an array for the first value that starts with a giving pattern
-     *
-     * @param array $subjects
-     * @param string $search
-     *
-     * @return bool
-    */
-    protected function inArraySearch(array $subjects, $search)
-    {
-        foreach ($subjects as $subject) {
-            if (str_is($search . '*', $subject)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * It set the options property for a giving field
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return $this
-    */
-    protected function setOptionsProperty(Field & $field, array $properties)
-    {
-        $labels = $this->getOptions($field, $properties);
-
-        if (!is_null($labels)) {
-            foreach ($labels as $label) {
-                $field->addOption($label->text, $label->localeGroup, $label->isPlain, $label->lang, $label->value);
-            }
-        }
-
-        return $this;
-    }
-
-    /**
-     * Gets the options from a giving field
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return array|null
-    */
-    protected function getOptions(Field & $field, array $properties)
-    {
-        if (!$this->isKeyExists($properties, 'options')) {
-            return null;
-        }
-
-        if (is_array($properties['options'])) {
-            return self::transferOptionsToLabels($field, $properties['options'], $this->defaultLang, $this->localeGroup);
-        }
-
-        return $this->parseOptions($properties['options']);
-    }
-    
-    /**
-     * Transfers options array to array on Labels
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $options
-     * @param string $lang
-     * @param string $localeGroup
-     *
-     * @return array
-    */
-    public static function transferOptionsToLabels(Field & $field, array $options, $lang, $localeGroup)
-    {
-        $finalOptions = [];
-
-        $associative = Helpers::isAssociative($options);
-        
-        $index = 0;
-
-        foreach ($options as $value => $option) {
-            if ($field->isBoolean()) {
-                // Since we know this field is a boolean type,
-                // we should allow only two options and it must 0 or 1
-
-                if ($index > 1) {
-                    continue;
-                }
-
-                $value = $index;
-            } elseif (!$associative) {
-                $value = $option;
-            }
-
-            ++$index;
-            
-            if (!is_array($option)) {
-                // At this point the options are plain text without locale
-                $finalOptions[] = new Label($option, $localeGroup, true, $lang, null, $value);
-                continue;
-            }
-
-            $optionLang = $value;
-
-            foreach ($option as $optionValue => $text) {
-                // At this point the options are in array which mean they need translation.
-                //$lang = is_numeric($optionValue) || empty($optionValue) ? $lang : $optionValue;
-                $finalOptions[] = new Label($text, $localeGroup, false, $optionLang, null, $optionValue);
-            }
-        }
-
-        return $finalOptions;
-    }
-
-    /**
-     * It set the predefined property for a giving field.
-     * it uses the predefinedKeyMapping array
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return $this
-    */
-    protected function setPredefindProperties(Field & $field, array $properties)
-    {
-        foreach ($this->predefinedKeyMapping as $key => $property) {
-            if ($this->isKeyExists($properties, $key)) {
-                if (is_array($property)) {
-                    foreach ($property as $name) {
-                        $field->{$name} = $properties[$key];
-                    }
-                } else {
-                    $field->{$property} = $properties[$key];
-                }
-            }
-        }
-
-        return $this;
+        $this->rawFields = $properties;
+        $this->localeGroup = $localeGroup;
+        $this->languages = array_unique($languages);
+        $this->isReadOnly = $isReadOnly;
     }
 
     /**
      * It get the fields collection
      *
      * @return array
-    */
+     */
     protected function getFields()
     {
         return $this->fields;
     }
 
     /**
-     * It get the labels from a giving array
-     *
-     * @param array $items
+     * It transfres the raw fields into Fields by setting the $this->fields array
      *
      * @return $this
-    */
-    protected function getLabelsFromArray(array $items)
+     */
+    protected function transfer()
     {
-        $labels = [];
-
-        foreach ($items as $key => $label) {
-            $lang = empty($key) || is_numeric($key) ? $this->defaultLang : $key;
-            $labels[] = new Label($label, $this->localeGroup, false, $lang);
+        $names = array_column($this->rawFields, 'name');
+        if (array_unique($names) !== $names) {
+            throw new Exception('Each field name must be unique. Please check the profided field names');
         }
 
-        return $labels;
-    }
+        $mappers = [];
+        foreach ($this->rawFields as $rawField) {
+            $properties = (array) $rawField;
 
-    /**
-     * It will get the provided labels for the placeholder
-     *
-     * @param CrestApps\CodeGenerator\Models\Field $field
-     * @param array $properties
-     *
-     * @return array
-    */
-    protected function getPlaceholder(Field $field, array $properties)
-    {
-        if (isset($properties['placeholder']) && !empty($properties['placeholder'])) {
-            if (is_array($properties['placeholder'])) {
-                //At this point we know this the label
-                return $this->getLabelsFromArray($properties['placeholder']);
+            if (!$this->isReadOnly) {
+                //This make sure the field name is updated
+                $properties['name'] = Field::getNameFromArray($properties);
+
+                $this->presetProperties($properties)
+                    ->setLabels($properties)
+                    ->setPlaceholder($properties)
+                    ->setOptions($properties);
             }
 
-            return [
-                new Label($properties['placeholder'], $this->localeGroup, true, $this->defaultLang)
-            ];
+            $field = Field::fromArray($properties, $this->localeGroup, $this->languages);
+
+            $mappers[] = new FieldMapper($field, (array) $rawField);
         }
 
-        $labels = [];
-
-        if (!isset($properties['placeholder'])) {
-            $templates = Config::getPlaceholderByHtmlType();
-
-            foreach ($templates as $type => $title) {
-                if ($field->htmlType == $type) {
-                    $fieldName = $field->hasForeignRelation() ? $field->getForeignRelation()->name : $field->name;
-                    $this->replaceFieldNamePatterns($title, $fieldName);
-                    $langs = $field->getAvailableLanguages();
-
-                    if (count($langs) == 0) {
-                        return [
-                            new Label($title, $this->localeGroup, true, $this->defaultLang)
-                        ];
-                    }
-
-                    foreach ($langs as $lang) {
-                        $labels[] = new Label($title, $this->localeGroup, false, $lang);
-                    }
-                }
-            }
-        }
-
-        return $labels;
-    }
-
-    /**
-     * It will get the provided labels from with the $properties's 'label' or 'labels' property
-     *
-     * @param array $properties
-     *
-     * @return array
-    */
-    protected function getLabels(array $properties)
-    {
-        if (isset($properties['labels']) && is_array($properties['labels'])) {
-            //At this point we know the is array of labels
-            return $this->getLabelsFromArray($properties['labels']);
-        }
-
-        if (isset($properties['label'])) {
-            if (is_array($properties['label'])) {
-                //At this point we know this the label
-                return $this->getLabelsFromArray($properties['label']);
-            }
-
-            return [
-                new Label($properties['label'], $this->localeGroup, true, $this->defaultLang)
-            ];
-        }
-
-        $labels = $this->getLabelsFromRawProperties($properties);
-
-        if (!isset($labels[0]) && isset($properties['name'])) {
-            //At this point we know there are no labels found, generate one use the name
-            $label = self::convertNameToLabel($properties['name']);
-
-            return [
-                new Label($label, $this->localeGroup, true, $this->defaultLang)
-            ];
-        }
-
-        return $labels;
-    }
-
-    /**
-     * It will get the provided labels from with the $properties's label property
-     * it will convert the following format "en|ar:label=Some Label" or "label=Some Label" to an array
-     *
-     * @param array $properties
-     *
-     * @return array
-    */
-    protected function getLabelsFromRawProperties(array $properties)
-    {
-        $labels = [];
-
-        foreach ($properties as $key => $label) {
-            if (!in_array($key, ['labels','label'])) {
-                continue;
-            }
-
-            $messages = Helpers::removeEmptyItems(explode('|', $label));
-
-            foreach ($messages as $message) {
-                $index = strpos($message, ':');
-
-                if ($index !== false) {
-                    $labelText = substr($message, $index + 1);
-                    $labelValue = substr($message, 0, $index);
-
-                    $labels[] = new Label($labelText, $this->localeGroup, false, $labelValue);
-                } else {
-                    $labels[] = new Label($message, $this->localeGroup, true, $this->defaultLang);
-                }
-            }
-        }
-
-        return $labels;
-    }
-
-    /**
-     * Parses a giving string and turns it into a valid array
-     *
-     * @param string $optionsString
-     *
-     * @return array
-    */
-    protected function parseOptions($optionsString)
-    {
-        $options = Helpers::removeEmptyItems(explode('|', $optionsString));
-        $finalOptions = [];
-
-        foreach ($options as $option) {
-            $index = strpos(':', $option);
-
-            if ($index !== false) {
-                $labelText = substr($option, $index + 1);
-                $labelValue = substr($option, 0, $index);
-                $finalOptions[] = new Label($labelText, $this->localeGroup, true, $this->defaultLang);
-            } else {
-                $finalOptions[] = new Label($option, $this->localeGroup, true, $this->defaultLang);
-            }
-        }
-
-        return $finalOptions;
-    }
-
-    /**
-     * Parses giving string and turns it into a valid array
-     *
-     * @param string $fieldsString
-     *
-     * @return array
-    */
-    protected function parseRawString($fieldsString)
-    {
-        if (empty($fieldsString)) {
-            return [];
-        }
-        
-        $fields = explode('#', $fieldsString);
-        $finalFields = [];
-
-        foreach ($fields as $field) {
-            $configs = $this->getPropertyConfig(Helpers::removeEmptyItems(explode(';', $field)));
-
-            if (!empty($configs)) {
-                $finalFields[] = $configs;
-            }
-        }
-
-        return $finalFields;
-    }
-
-    /**
-     * Parses the properties array
-     *
-     * @param string $properties
-     *
-     * @return array
-    */
-    protected function getPropertyConfig(array $properties)
-    {
-        $configs = [];
-        foreach ($properties as $property) {
-            $config = Helpers::removeEmptyItems(explode('=', $property));
-            $totalParts = count($config);
-        
-            if ($totalParts == 2) {
-                $configs[$config[0]] = $this->isProperyBool($config[0]) ? Helpers::stringToBool($config[1]): $config[1];
-            } elseif ($totalParts == 1) {
-                $configs[$config[0]] = true;
-            }
-        }
-
-        return $configs;
-    }
-
-    /**
-     * Gets a label from a giving name
-     *
-     * @param string $name
-     *
-     * @return string
-    */
-    public static function convertNameToLabel($name)
-    {
-        return ucwords(str_replace('_', ' ', $name));
-    }
-
-    /**
-     * Replaces the field name pattern of the givin stub.
-     *
-     * @param string $stub
-     * @param string $name
-     *
-     * @return $this
-    */
-    protected function replaceFieldNamePatterns(&$stub, $name)
-    {
-        $snake = snake_case($name);
-        $englishSingle = str_replace('_', ' ', $snake);
-        $plural = str_plural($englishSingle);
-
-        $stub = $this->strReplace('field_name', $englishSingle, $stub);
-        $stub = $this->strReplace('field_name_flat', strtolower($name), $stub);
-        $stub = $this->strReplace('field_name_sentence', ucfirst($englishSingle), $stub);
-        $stub = $this->strReplace('field_name_plural', $plural, $stub);
-        $stub = $this->strReplace('field_name_plural_title', title_case($plural), $stub);
-        $stub = $this->strReplace('field_name_snake', $snake, $stub);
-        $stub = $this->strReplace('field_name_studly', studly_case($name), $stub);
-        $stub = $this->strReplace('field_name_slug', str_slug($englishSingle), $stub);
-        $stub = $this->strReplace('field_name_kebab', Helpers::kebabCase($name), $stub);
-        $stub = $this->strReplace('field_name_title', Helpers::titleCase($englishSingle), $stub);
-        $stub = $this->strReplace('field_name_title_lower', strtolower($englishSingle), $stub);
-        $stub = $this->strReplace('field_name_title_upper', strtoupper($englishSingle), $stub);
-        $stub = $this->strReplace('field_name_class', $name, $stub);
-        $stub = $this->strReplace('field_name_plural_variable', $this->getPluralVariable($name), $stub);
-        $stub = $this->strReplace('field_name_singular_variable', $this->getSingularVariable($name), $stub);
+        $optimizer = new FieldsOptimizer($mappers);
+        $this->fields = $optimizer->optimize()->getFields();
 
         return $this;
     }
+
+    /**
+     * Sets the labels property
+     *
+     * @param array $properties
+     *
+     * @return $this
+     */
+    protected function setLabels(&$properties)
+    {
+        $label = $properties['name'];
+
+        if (Helpers::isKeyExists($properties, 'labels')) {
+            $label = $properties['labels'];
+        }
+
+        $properties['labels'] = $this->getLabels($label, $properties['name']);
+
+        return $this;
+    }
+
+    /**
+     * Sets the placeholder property
+     *
+     * @param array $properties
+     *
+     * @return $this
+     */
+    protected function setPlaceholder(&$properties)
+    {
+        if (!Helpers::isKeyExists($properties, 'placeholder')) {
+            $properties['placeholder'] = $this->getPlaceholders($properties['name'], $this->getHtmlType($properties));
+        }
+
+        return $this;
+    }
+
+    protected function setOptions(&$properties)
+    {
+        if (Helpers::isKeyExists($properties, 'options')) {
+            $properties['options'] = $this->getOptions((array) $properties['options']);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Get the properties after applying the predefined keys.
+     *
+     * @param array $properties
+     * @param array $languages
+     *
+     * @return $this
+     */
+    public function presetProperties(array &$properties)
+    {
+        $definitions = Config::getCommonDefinitions();
+
+        foreach ($definitions as $definition) {
+            $patterns = $this->getArrayByKey($definition, 'match');
+
+            if (Helpers::strIs($patterns, $properties['name'])) {
+                //auto add any config from the master config
+                $settings = $this->getArrayByKey($definition, 'set');
+
+                foreach ($settings as $key => $setting) {
+                    if (!Helpers::isKeyExists($properties, $key) || empty($properties[$key])) {
+                        $properties[$key] = $setting;
+                    }
+                }
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * Gets labels from a giving title and field name.
+     *
+     * @param string $title
+     * @param string $name
+     *
+     * @return mix (string | array)
+     */
+    protected function getLabels($title, $name)
+    {
+        if (is_array($title)) {
+            $title = $this->getFirstElement($title);
+        }
+
+        $name = Helpers::removePostFixWith($name, '_id');
+
+        $this->replaceModelName($title, $name, 'field_');
+
+        if ($this->hasLanguages()) {
+            $labels = [];
+
+            foreach ($this->languages as $language) {
+                $labels[$language] = $title;
+            }
+
+            return $labels;
+        }
+
+        return $title;
+    }
+
+    /**
+     * Gets options from a giving array of options
+     *
+     * @param string $name
+     *
+     * @return mix (string|array)
+     */
+    protected function getFirstElement(array $array)
+    {
+        $value = reset($array);
+
+        if (is_array($value)) {
+            return $this->getFirstElement($value);
+        }
+
+        return $value;
+    }
+
+    /**
+     * Gets options from a giving array of options
+     *
+     * @param string $name
+     *
+     * @return mix (string|array)
+     */
+    protected function getOptions(array $options)
+    {
+        $labels = [];
+        if ($this->hasLanguages()) {
+            // As this point we are construction the options for multiple languages
+            foreach ($this->languages as $language) {
+                foreach ($options as $key => $option) {
+                    $labels[$language][$key] = Helpers::convertNameToLabel($option);
+                }
+            }
+        } else {
+
+            // At this point we are just formatting the labels
+            foreach ($options as $key => $option) {
+                $labels[$key] = Helpers::convertNameToLabel($option);
+            }
+        }
+
+        return $labels;
+    }
+
+    /**
+     * Gets labels from a giving title and field name.
+     *
+     * @param string $name
+     *
+     * @return mix (string|array)
+     */
+    protected function getPlaceholders($name, $htmlType)
+    {
+        $templates = Config::getPlaceholderByHtmlType();
+
+        foreach ($templates as $type => $template) {
+            if ($type == $htmlType) {
+                return $this->getLabels($template, $name);
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * Gets the html-type from the giving array
+     *
+     * @param array $properties
+     *
+     * @return string
+     */
+    protected function getHtmlType(array $properties)
+    {
+        return Field::isValidHtmlType($properties) ? $properties['html-type'] : 'text';
+    }
+
+    /**
+     * Get the properties after applying the predefined keys.
+     *
+     * @param array $array
+     * @param string $key
+     *
+     * @return array
+     */
+    protected function getArrayByKey(array $array, $key)
+    {
+        return Helpers::isKeyExists($array, $key) ? (array) $array[$key] : [];
+    }
+
+    /**
+     * Checks if there are languages the are required
+     *
+     * @return bool
+     */
+    protected function hasLanguages()
+    {
+        return !empty($this->languages);
+    }
+
 }

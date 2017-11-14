@@ -2,6 +2,8 @@
 
 namespace CrestApps\CodeGenerator;
 
+use CrestApps\CodeGenerator\Support\Helpers;
+use File;
 use Illuminate\Support\ServiceProvider;
 
 class CodeGeneratorServiceProvider extends ServiceProvider
@@ -17,14 +19,20 @@ class CodeGeneratorServiceProvider extends ServiceProvider
 
         $this->publishes([
             $dir . 'config/codegenerator.php' => config_path('codegenerator.php'),
-            $dir . 'templates/default' => base_path('resources/codegenerator-templates/default'),
+            $dir . 'templates/default' => $this->codeGeneratorBase('templates/default'),
         ], 'default');
 
+        if (!File::exists(config_path('codegenerator_custom.php'))) {
+            $this->publishes([
+                $dir . 'config/codegenerator_custom.php' => config_path('codegenerator_custom.php'),
+            ], 'default');
+        }
+
         $this->publishes([
-            $dir . 'templates/default-collective' => base_path('resources/codegenerator-templates/default-collective'),
+            $dir . 'templates/default-collective' => $this->codeGeneratorBase('templates/default-collective'),
         ], 'default-collective');
 
-        $this->createDirectory(base_path('resources/codegenerator-files'));
+        $this->createDirectory($this->codeGeneratorBase('sources'));
     }
 
     /**
@@ -34,7 +42,7 @@ class CodeGeneratorServiceProvider extends ServiceProvider
      */
     public function register()
     {
-        $this->commands(
+        $commands = [
             'CrestApps\CodeGenerator\Commands\CreateControllerCommand',
             'CrestApps\CodeGenerator\Commands\CreateModelCommand',
             'CrestApps\CodeGenerator\Commands\CreateIndexViewCommand',
@@ -51,26 +59,49 @@ class CodeGeneratorServiceProvider extends ServiceProvider
             'CrestApps\CodeGenerator\Commands\CreateMappedResourcesCommand',
             'CrestApps\CodeGenerator\Commands\CreateViewLayoutCommand',
             'CrestApps\CodeGenerator\Commands\CreateLayoutCommand',
-            'CrestApps\CodeGenerator\Commands\CreateFieldsFileCommand',
-            'CrestApps\CodeGenerator\Commands\FieldsFileCreateCommand',
-            'CrestApps\CodeGenerator\Commands\FieldsFileDeleteCommand',
-            'CrestApps\CodeGenerator\Commands\FieldsFileAppendCommand',
-            'CrestApps\CodeGenerator\Commands\FieldsFileReduceCommand'
-        );
+            'CrestApps\CodeGenerator\Commands\ResourceFileFromDatabaseCommand',
+            'CrestApps\CodeGenerator\Commands\ResourceFileCreateCommand',
+            'CrestApps\CodeGenerator\Commands\ResourceFileDeleteCommand',
+            'CrestApps\CodeGenerator\Commands\ResourceFileAppendCommand',
+            'CrestApps\CodeGenerator\Commands\ResourceFileReduceCommand',
+        ];
+
+        if (Helpers::isNewerThanOrEqualTo()) {
+            $commands = array_merge($commands, [
+                'CrestApps\CodeGenerator\Commands\Migrations\MigrateAllCommand',
+                'CrestApps\CodeGenerator\Commands\Migrations\RefreshAllCommand',
+                'CrestApps\CodeGenerator\Commands\Migrations\ResetAllCommand',
+                'CrestApps\CodeGenerator\Commands\Migrations\RollbackAllCommand',
+                'CrestApps\CodeGenerator\Commands\Migrations\StatusAllCommand',
+            ]);
+        }
+
+        $this->commands($commands);
     }
 
     /**
-     * create a directory if one does not already exists
+     * Create a directory if one does not already exists
      *
      * @param string $path
-     * @param string $mode
      *
      * @return void
      */
-    protected function createDirectory($path, $mode = '0777')
+    protected function createDirectory($path)
     {
-        if (!file_exists($path)) {
-            mkdir($path, $mode);
+        if (!File::exists($path)) {
+            File::makeDirectory($path, 0777, true);
         }
+    }
+
+    /**
+     * Get the laravel-code-generator base path
+     *
+     * @param string $path
+     *
+     * @return string
+     */
+    protected function codeGeneratorBase($path = null)
+    {
+        return base_path('resources/laravel-code-generator/') . $path;
     }
 }

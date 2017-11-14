@@ -2,10 +2,10 @@
 
 namespace CrestApps\CodeGenerator\Commands;
 
-use CrestApps\CodeGenerator\Support\ViewsCommand;
-use CrestApps\CodeGenerator\Support\GenerateFormViews;
+use CrestApps\CodeGenerator\Commands\Bases\ViewsCommandBase;
+use CrestApps\CodeGenerator\Models\Resource;
 
-class CreateShowViewCommand extends ViewsCommand
+class CreateShowViewCommand extends ViewsCommandBase
 {
     /**
      * The name and signature of the console command.
@@ -14,11 +14,10 @@ class CreateShowViewCommand extends ViewsCommand
      */
     protected $signature = 'create:show-view
                             {model-name : The model name that this view will represent.}
-                            {--fields= : The fields to define the model.}
-                            {--fields-file= : File name to import fields from.}
+                            {--resource-file= : The name of the resource-file to import from.}
                             {--views-directory= : The name of the directory to create the views under.}
-                            {--routes-prefix= : The routes prefix.}
-                            {--lang-file-name= : The name of the language file.}
+                            {--routes-prefix=default-form : Prefix of the route group.}
+                            {--language-filename= : The name of the language file.}
                             {--layout-name=layouts.app : This will extract the validation into a request form class.}
                             {--template-name= : The template name to use when generating the code.}
                             {--force : This option will override the view if one already exists.}';
@@ -48,19 +47,19 @@ class CreateShowViewCommand extends ViewsCommand
     protected function handleCreateView()
     {
         $input = $this->getCommandInput();
-        $fields = $this->getFields($input->fields, $input->languageFileName, $input->fieldsFile);
+        $resources = Resource::fromFile($input->resourceFile, $input->languageFileName);
         $destenationFile = $this->getDestinationViewFullname($input->viewsDirectory, $input->prefix, 'show');
-        
-        if ($this->canCreateView($destenationFile, $input->force, $fields)) {
-            $stub = $this->getStub();
-            $htmlCreator = $this->getHtmlGenerator($fields, $input->modelName, $this->getTemplateName());
 
-            $this->replaceCommonTemplates($stub, $input, $fields)
-                 ->replacePrimaryKey($stub, $this->getPrimaryKeyName($fields))
-                 ->replaceTableRows($stub, $htmlCreator->getShowRowsHtml())
-                 ->replaceModelHeader($stub, $this->getHeaderFieldAccessor($fields, $input->modelName))
-                 ->createFile($destenationFile, $stub)
-                 ->info('Show view was crafted successfully.');
+        if ($this->canCreateView($destenationFile, $input->force, $resources->fields)) {
+            $stub = $this->getStub();
+            $htmlCreator = $this->getHtmlGenerator($resources->fields, $input->modelName, $this->getTemplateName());
+
+            $this->replaceCommonTemplates($stub, $input, $resources->fields)
+                ->replacePrimaryKey($stub, $this->getPrimaryKeyName($resources->fields))
+                ->replaceTableRows($stub, $htmlCreator->getShowRowsHtml())
+                ->replaceModelHeader($stub, $this->getHeaderFieldAccessor($resources->fields, $input->modelName))
+                ->createFile($destenationFile, $stub)
+                ->info('Show view was crafted successfully.');
         }
     }
 
@@ -74,8 +73,6 @@ class CreateShowViewCommand extends ViewsCommand
      */
     protected function replaceTableRows(&$stub, $rows)
     {
-        $stub = $this->strReplace('table_rows', $rows, $stub);
-
-        return $this;
+        return $this->replaceTemplate('table_rows', $rows, $stub);
     }
 }

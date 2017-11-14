@@ -2,11 +2,12 @@
 
 namespace CrestApps\CodeGenerator\Traits;
 
-use File;
-use Exception;
-use CrestApps\CodeGenerator\Support\Helpers;
-use CrestApps\CodeGenerator\Support\Config;
 use CrestApps\CodeGenerator\Models\Field;
+use CrestApps\CodeGenerator\Support\Config;
+use CrestApps\CodeGenerator\Support\Helpers;
+use CrestApps\CodeGenerator\Support\Str;
+use Exception;
+use File;
 use Illuminate\Container\Container;
 
 trait CommonCommand
@@ -17,11 +18,11 @@ trait CommonCommand
      * @var array
      */
     protected $noValues = [
-                        'empty',
-                        'no_value',
-                        'blank', 
-                        'none'
-                    ];
+        'empty',
+        'no_value',
+        'blank',
+        'none',
+    ];
 
     /**
      * The default route actions
@@ -29,14 +30,14 @@ trait CommonCommand
      * @var array
      */
     protected $actions = [
-                    'index',
-                    'create',
-                    'show',
-                    'update',
-                    'edit',
-                    'destroy',
-                    'store'
-                ];
+        'index',
+        'create',
+        'show',
+        'update',
+        'edit',
+        'destroy',
+        'store',
+    ];
 
     /**
      * The default views actions
@@ -44,30 +45,12 @@ trait CommonCommand
      * @var array
      */
     protected $views = [
-                    'form',
-                    'index',
-                    'create',
-                    'show',
-                    'edit'
-                ];
-
-    /**
-     * Gets the field from the input
-     *
-     * @param string $fields
-     * @param string $langFile
-     * @param string $fieldsFile
-     *
-     * @return Field array
-     */
-    protected function getFields($fields, $langFile, $fieldsFile)
-    {
-        if (!empty($fields)) {
-            return Helpers::getFields($fields, $langFile);
-        }
-
-        return Helpers::getFieldsFromFile($fieldsFile, $langFile);
-    }
+        'form',
+        'index',
+        'create',
+        'show',
+        'edit',
+    ];
 
     /**
      * Replaces a template variable in the giving subject.
@@ -82,6 +65,22 @@ trait CommonCommand
     }
 
     /**
+     * Replaces a template variable in the giving subject.
+     *
+     * @param string $search
+     * @param string $replace
+     * @param string $subject
+     *
+     * @return $this
+     */
+    protected function replaceTemplate($search, $replace, &$subject)
+    {
+        $subject = $this->strReplace($search, $replace, $subject);
+
+        return $this;
+    }
+
+    /**
      * convert a key to a template variable.
      *
      * @return string
@@ -92,13 +91,25 @@ trait CommonCommand
     }
 
     /**
+     * Gets the relation accessor for the giving foreign renationship.
+     *
+     * @param string $name
+     *
+     * @return string
+     */
+    protected function getUseClassCommand($name)
+    {
+        return sprintf('use %s;', $name);
+    }
+
+    /**
      * Gets the correct routes fullname based on current framework version.
      *
      * @return string
      */
     protected function getRoutesFileName()
     {
-        if (Helpers::isNewerThan()) {
+        if (Helpers::isNewerThanOrEqualTo()) {
             return base_path('routes/web.php');
         }
 
@@ -112,7 +123,7 @@ trait CommonCommand
      */
     public function arguments()
     {
-        if (Helpers::isNewerThan()) {
+        if (Helpers::isNewerThanOrEqualTo()) {
             return parent::arguments();
         }
 
@@ -122,37 +133,35 @@ trait CommonCommand
     /**
      * Gets plural variable instance of a giving model.
      *
-     * @param  string  $modelName
+     * @param  string  $name
      *
      * @return string
      */
-    public function getPluralVariable($modelName)
+    public function getPluralVariable($name)
     {
-        return camel_case(str_plural(snake_case($modelName)));
-    }
-    
-    /**
-     * Gets singular variable instance of a giving model.
-     *
-     * @param  string  $modelName
-     *
-     * @return string
-     */
-    public function getSingularVariable($modelName)
-    {
-        return lcfirst($modelName);
+        $snake = snake_case($name);
+
+        $variableName = camel_case(Str::plural($snake));
+
+        if ($variableName == $this->getSingularVariable($name)) {
+            $variableName .= 'Objects';
+        }
+
+        return $variableName;
     }
 
     /**
-     * Makes the table name from the giving model name.
+     * Gets singular variable instance of a giving model.
      *
-     * @param  string  $modelName
+     * @param  string  $name
      *
      * @return string
      */
-    protected function makeTableName($modelName)
+    public function getSingularVariable($name)
     {
-        return str_plural(snake_case($modelName));
+        $snake = snake_case($name);
+
+        return camel_case($snake);
     }
 
     /**
@@ -188,7 +197,7 @@ trait CommonCommand
         if ($multiplier < 1) {
             return '';
         }
-        
+
         return str_repeat(' ', $multiplier);
     }
 
@@ -199,7 +208,7 @@ trait CommonCommand
      */
     public function options()
     {
-        if (Helpers::isNewerThan()) {
+        if (Helpers::isNewerThanOrEqualTo()) {
             return parent::options();
         }
 
@@ -242,7 +251,7 @@ trait CommonCommand
             $viewTemplate = $this->getViewName($view);
             $stub = $this->strReplace($viewTemplate, $viewName, $stub);
         }
-        
+
         return $this;
     }
 
@@ -301,7 +310,7 @@ trait CommonCommand
             $routeTemplate = $this->getRouteName($action);
             $stub = $this->strReplace($routeTemplate, $routeName, $stub);
         }
-        
+
         return $this;
     }
 
@@ -439,6 +448,7 @@ trait CommonCommand
 
         return $this;
     }
+
     /**
      * Determine the primary field in a giving array
      *
@@ -474,7 +484,7 @@ trait CommonCommand
         return null;
     }
 
-     /**
+    /**
      * Build the directory for the class if necessary.
      *
      * @param  string  $path
@@ -508,26 +518,6 @@ trait CommonCommand
     }
 
     /**
-     * Gets laravel ready field validation format from a giving string
-     *
-     * @param string $validations
-     *
-     * @return string
-     */
-    protected function getValidationRules(array $fields)
-    {
-        $validations = '';
-
-        foreach ($fields as $field) {
-            if (!empty($field->validationRules)) {
-                $validations .= sprintf("        '%s' => '%s',\n    ", $field->name, implode('|', $field->validationRules));
-            }
-        }
-
-        return $validations;
-    }
-
-    /**
      * Checks if the givin field is an instance of a field or not.
      *
      * @return string
@@ -549,9 +539,9 @@ trait CommonCommand
         $template = Helpers::getPathWithSlash($template ?: Config::getDefaultTemplateName());
         $basePath = base_path(Config::getTemplatesPath() . $template);
         $path = Helpers::getPathWithSlash($basePath);
-  
+
         if (!$this->isFileExists($path)) {
-            throw new Exception('Invalid template name or the templates is invalid. Make sure the following path exists: "' . $path . '"');
+            throw new Exception('Invalid template. Make sure the following path exists: "' . $path . '"');
         }
 
         return $path;
@@ -581,7 +571,7 @@ trait CommonCommand
         $filtered = array_filter($fields, function ($field) {
             return $field->isFile();
         });
-        
+
         return (count($filtered) > 0);
     }
 

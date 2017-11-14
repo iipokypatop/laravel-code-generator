@@ -14,18 +14,11 @@ class ViewInput
     public $modelName;
 
     /**
-     * The provided fields
-     *
-     * @var string
-     */
-    public $fields;
-
-    /**
      * The provided field's file name
      *
      * @var string
      */
-    public $fieldsFile;
+    public $resourceFile;
 
     /**
      * The provided views directory name
@@ -55,7 +48,7 @@ class ViewInput
      */
     public $languageFileName;
 
-     /**
+    /**
      * The provided layout name
      *
      * @var string
@@ -70,12 +63,12 @@ class ViewInput
     public function __construct(array $arguments, array $options = [])
     {
         $this->modelName = trim($arguments['model-name']);
-        $this->fields = trim($options['fields']);
-        $this->fieldsFile = trim($options['fields-file']) ?: Helpers::makeJsonFileName($this->modelName);
+        $this->resourceFile = trim($options['resource-file']) ?: Helpers::makeJsonFileName($this->modelName);
         $this->viewsDirectory = trim($options['views-directory']);
-        $this->prefix = trim($options['routes-prefix']);
+        $prefix = trim($options['routes-prefix']);
+        $this->prefix = ($prefix == 'default-form') ? Helpers::makeRouteGroup($this->modelName) : $prefix;
         $this->force = $options['force'];
-        $this->languageFileName = trim($options['lang-file-name']) ?: Helpers::makeLocaleGroup($this->modelName);
+        $this->languageFileName = trim($options['language-filename']) ?: Helpers::makeLocaleGroup($this->modelName);
         $this->layout = trim($options['layout-name']);
         $this->template = trim($options['template-name']);
     }
@@ -88,15 +81,14 @@ class ViewInput
     public function getArrguments()
     {
         return [
-            'model-name'        => $this->modelName,
-            '--fields'          => $this->fields,
-            '--fields-file'     => $this->fieldsFile,
+            'model-name' => $this->modelName,
+            '--resource-file' => $this->resourceFile,
             '--views-directory' => $this->viewsDirectory,
-            '--routes-prefix'   => $this->prefix,
-            '--force'           => $this->force,
-            '--lang-file-name'  => $this->languageFileName,
-            '--layout-name'     => $this->layout,
-            '--template-name'   => $this->template
+            '--routes-prefix' => $this->prefix,
+            '--language-filename' => $this->languageFileName,
+            '--layout-name' => $this->layout,
+            '--template-name' => $this->template,
+            '--force' => $this->force,
         ];
     }
 }

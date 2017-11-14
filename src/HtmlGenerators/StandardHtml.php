@@ -3,9 +3,10 @@
 namespace CrestApps\CodeGenerator\HtmlGenerators;
 
 use CrestApps\CodeGenerator\HtmlGenerators\HtmlGeneratorBase;
-use CrestApps\CodeGenerator\Models\Label;
 use CrestApps\CodeGenerator\Models\Field;
+use CrestApps\CodeGenerator\Models\Label;
 use CrestApps\CodeGenerator\Support\Helpers;
+use CrestApps\CodeGenerator\Support\ViewLabelsGenerator;
 
 class StandardHtml extends HtmlGeneratorBase
 {
@@ -78,11 +79,11 @@ class StandardHtml extends HtmlGeneratorBase
      */
     protected function getFieldPlaceHolder(Label $placeholder = null)
     {
-        if(is_null($placeholder)) {
+        if (is_null($placeholder)) {
             return '';
         }
 
-        return empty($placeholder) ? '' : sprintf(' placeholder="%s"', $this->getTitle($placeholder, true) );
+        return empty($placeholder) ? '' : sprintf(' placeholder="%s"', $this->getTitle($placeholder, true));
     }
 
     /**
@@ -95,7 +96,7 @@ class StandardHtml extends HtmlGeneratorBase
      */
     protected function getFieldPlaceHolderForMenu(Label $placeholder = null, $name = '')
     {
-        if(is_null($placeholder)) {
+        if (is_null($placeholder)) {
             return '';
         }
 
@@ -111,7 +112,7 @@ class StandardHtml extends HtmlGeneratorBase
      */
     protected function getFieldMultiple($isMulti)
     {
-        return $isMulti ? 'multiple="multiple"' : '';
+        return $isMulti ? ' multiple="multiple"' : '';
     }
 
     /**
@@ -169,9 +170,11 @@ class StandardHtml extends HtmlGeneratorBase
      */
     protected function getCheckedItem($value, $name, $defaultValue)
     {
-        return sprintf(" {{ %s == '%s' ? 'checked' : '' }}", 
-                        $this->getRawOptionValue($name, $defaultValue), 
-                        $value);
+        return sprintf(
+            " {{ %s == '%s' ? 'checked' : '' }}",
+            $this->getRawOptionValue($name, $defaultValue),
+            $value
+        );
     }
 
     /**
@@ -185,7 +188,32 @@ class StandardHtml extends HtmlGeneratorBase
      */
     protected function getMultipleCheckedItem($value, $name, $defaultValue)
     {
+
         return sprintf(" {{ %s ? 'checked' : '' }}", $this->getMultipleRawOptionValue($name, $value, $defaultValue));
+    }
+
+    /**
+     * Gets the best value accessor for the view
+     *
+     * @param string $modelVariable
+     * @param string $property
+     * @param string $value
+     *
+     * @return string
+     */
+    protected function getDefaultValueAccessor($modelVariable, $property, $value)
+    {
+        if (Helpers::isNewerThanOrEqualTo('5.5')) {
+            $template = sprintf('optional($%s)->%s', $modelVariable, $property);
+
+            if (is_null($value) || in_array($value, ['null', '[]'])) {
+                return $template;
+            }
+
+            return $template . ' ?: ' . $value;
+        }
+
+        return sprintf("isset(\$%s->%s) ? \$%s->%s : %s", $modelVariable, $property, $modelVariable, $property, $value);
     }
 
     /**
@@ -199,7 +227,7 @@ class StandardHtml extends HtmlGeneratorBase
      */
     protected function getMultipleSelectedValue($name, $valueAccessor, $defaultValue)
     {
-        return sprintf(" {{ %s ? 'selected' : '' }}", $name);
+        return sprintf(" {{ %s ? 'selected' : '' }}", $this->getMultipleRawOptionValue($name, $valueAccessor, $defaultValue));
     }
 
     /**
@@ -230,7 +258,9 @@ class StandardHtml extends HtmlGeneratorBase
 
         $valueString = is_null($value) ? 'null' : sprintf("'%s'", $value);
 
-        return sprintf("old('%s', isset(\$%s->%s) ? \$%s->%s : %s)", $name, $modelVariable, $name, $modelVariable, $name, $valueString);
+        $accessor = $this->getDefaultValueAccessor($modelVariable, $name, $valueString);
+
+        return sprintf("old('%s', %s)", $name, $accessor);
     }
 
     /**
@@ -248,17 +278,19 @@ class StandardHtml extends HtmlGeneratorBase
         $valueString = 'null';
 
         if (!is_null($value)) {
-            $valueString = starts_with('$', $value) ? sprintf("%s", $value) : sprintf("'%s'", $value);
+            $valueString = starts_with($value, '$') ? sprintf("%s", $value) : sprintf("'%s'", $value);
         }
 
         $defaultValueString = '[]';
 
-        if(!empty($defaultValue)) {
-            $joinedValues = implode(',', Helpers::wrapItems((array)$defaultValue) );
+        if (!empty($defaultValue)) {
+            $joinedValues = implode(',', Helpers::wrapItems((array) $defaultValue));
             $defaultValueString = sprintf('[%s]', $joinedValues);
         }
 
-        return sprintf("in_array(%s, old('%s', isset(\$%s->%s) ? \$%s->%s : %s))", $valueString, $name, $modelVariable, $name, $modelVariable, $name, $defaultValueString);
+        $accessor = $this->getDefaultValueAccessor($modelVariable, $name, $defaultValueString);
+
+        return sprintf("in_array(%s, old('%s', %s) ?: [])", $valueString, $name, $accessor);
     }
 
     /**
@@ -274,7 +306,7 @@ class StandardHtml extends HtmlGeneratorBase
         $labelStub = $this->getStubContent('form-label-field.blade', $this->template);
 
         $this->replaceFieldName($labelStub, $name)
-             ->replaceFieldTitle($labelStub, $this->getTitle($label, true));
+            ->replaceFieldTitle($labelStub, $this->getTitle($label, true));
 
         return $labelStub;
     }
@@ -289,5 +321,15 @@ class StandardHtml extends HtmlGeneratorBase
     protected function getStepsValue($value)
     {
         return ($value) > 0 ? ' step="any"' : '';
+    }
+
+    /**
+     * Gets an instance of ViewLabelsGenerator
+     *
+     * @return CrestApps\CodeGenerator\Support\ViewLabelsGenerator
+     */
+    protected function getViewLabelsGenerator()
+    {
+        return new ViewLabelsGenerator($this->modelName, $this->fields, true);
     }
 }

@@ -1,7 +1,7 @@
 <?php
-
 namespace CrestApps\CodeGenerator\Traits;
-use CrestApps\CodeGenerator\Support\Helpers;
+
+use CrestApps\CodeGenerator\Support\Str;
 
 trait GeneratorReplacers
 {
@@ -13,37 +13,50 @@ trait GeneratorReplacers
      *
      * @return $this
      */
-    protected function replaceModelName(&$stub, $modelName)
+    protected function replaceModelName(&$stub, $modelName, $prefix = 'model_')
     {
         $englishSingle = $this->modelNamePlainEnglish($modelName);
-        
-        //allow custom plurals in the case that str_plural doesn't work fine in your language
-        if(config('codegenerator.plurals') && array_key_exists($englishSingle,config('codegenerator.plurals'))){
-            $plural = config('codegenerator.plurals')[$englishSingle];
-        }
-        else{
-            $plural = str_plural($englishSingle);            
-        } 
-
-        $stub = $this->strReplace('model_name', $englishSingle, $stub);
-        $stub = $this->strReplace('model_name_flat', strtolower($modelName), $stub);   
-        $stub = $this->strReplace('model_name_sentence', ucfirst($englishSingle), $stub);
-        $stub = $this->strReplace('model_name_plural', $plural, $stub);
-        $stub = $this->strReplace('model_name_plural_title', Helpers::titleCase($plural), $stub);
-        $stub = $this->strReplace('model_name_snake', snake_case($modelName), $stub);
-        $stub = $this->strReplace('model_name_studly', studly_case($modelName), $stub);
-        $stub = $this->strReplace('model_name_slug', str_slug($englishSingle), $stub);
-        $stub = $this->strReplace('model_name_kebab', Helpers::kebabCase($modelName), $stub);
-        $stub = $this->strReplace('model_name_title', Helpers::titleCase($englishSingle), $stub);
-        $stub = $this->strReplace('model_name_title_lower', strtolower($englishSingle), $stub);
-        $stub = $this->strReplace('model_name_title_upper', strtoupper($englishSingle), $stub);
-        $stub = $this->strReplace('model_name_class', $modelName, $stub);       
-        $stub = $this->strReplace('model_name_plural_variable', $this->getPluralVariable($modelName), $stub);
-        $stub = $this->strReplace('model_name_singular_variable', $this->getSingularVariable($modelName), $stub);
+        $plural = Str::plural($englishSingle);
+        $stub = $this->strReplace($prefix . 'name', $englishSingle, $stub);
+        $stub = $this->strReplace($prefix . 'name_flat', strtolower($modelName), $stub);
+        $stub = $this->strReplace($prefix . 'name_sentence', ucfirst($englishSingle), $stub);
+        $stub = $this->strReplace($prefix . 'name_plural', $plural, $stub);
+        $stub = $this->strReplace($prefix . 'name_plural_title', Str::titleCase($plural), $stub);
+        $stub = $this->strReplace($prefix . 'name_snake', snake_case($modelName), $stub);
+        $stub = $this->strReplace($prefix . 'name_studly', studly_case($modelName), $stub);
+        $stub = $this->strReplace($prefix . 'name_slug', str_slug($englishSingle), $stub);
+        $stub = $this->strReplace($prefix . 'name_kebab', Str::kebabCase($modelName), $stub);
+        $stub = $this->strReplace($prefix . 'name_title', Str::titleCase($englishSingle), $stub);
+        $stub = $this->strReplace($prefix . 'name_title_lower', strtolower($englishSingle), $stub);
+        $stub = $this->strReplace($prefix . 'name_title_upper', strtoupper($englishSingle), $stub);
+        $stub = $this->strReplace($prefix . 'name_class', $modelName, $stub);
+        $stub = $this->strReplace($prefix . 'name_plural_variable', $this->getPluralVariable($modelName), $stub);
+        $stub = $this->strReplace($prefix . 'name_singular_variable', $this->getSingularVariable($modelName), $stub);
 
         return $this;
     }
 
+    /**
+     * It Replaces the templates of the givin $labels
+     *
+     * @param string $stub
+     * @param array $items
+     *
+     * @return $this
+     */
+    protected function replaceStandardLabels(&$stub, array $items)
+    {
+        foreach ($items as $labels) {
+            foreach ($labels as $label) {
+                $text = $label->isPlain ? $label->text : sprintf("{{ trans('%s') }}", $label->localeGroup);
+                if ($label->isInFunction) {
+                    $text = $label->isPlain ? sprintf("'%s'", $label->text) : sprintf("trans('%s')", $label->localeGroup);
+                }
+                $stub = $this->strReplace($label->template, $text, $stub);
+            }
+        }
+        return $this;
+    }
     /**
      * Gets the
      *
@@ -55,7 +68,6 @@ trait GeneratorReplacers
     {
         return str_replace('_', ' ', snake_case($modelName));
     }
-
     /**
      * Replace the controller_name fo the given stub.
      *
@@ -67,10 +79,8 @@ trait GeneratorReplacers
     protected function replaceControllerName(&$stub, $name)
     {
         $stub = $this->strReplace('controller_name', $name, $stub);
-
         return $this;
     }
-    
     /**
      * It Replaces the primary key in a giving stub
      *
@@ -81,11 +91,8 @@ trait GeneratorReplacers
      */
     protected function replacePrimaryKey(&$stub, $primaryKey)
     {
-        $stub = $this->strReplace('primary_key', $primaryKey, $stub);
-
-        return $this;
+        return $this->replaceTemplate('primary_key', $primaryKey, $stub);
     }
-    
     /**
      * Replace the app_name fo the given stub.
      *
@@ -96,11 +103,8 @@ trait GeneratorReplacers
      */
     protected function replaceAppName(&$stub, $name)
     {
-        $stub = $this->strReplace('app_name', $name, $stub);
-
-        return $this;
+        return $this->replaceTemplate('app_name', $name, $stub);
     }
-
     /**
      * Replace the namespace fo the given stub.
      *
@@ -111,11 +115,8 @@ trait GeneratorReplacers
      */
     protected function replaceNamespace(&$stub, $namespace)
     {
-        $stub = $this->strReplace('namespace', $namespace, $stub);
-
-        return $this;
+        return $this->replaceTemplate('namespace', $namespace, $stub);
     }
-    
     /**
      * Replace the validation rules for the given stub.
      *
@@ -126,11 +127,8 @@ trait GeneratorReplacers
      */
     protected function replaceValidationRules(&$stub, $rules)
     {
-        $stub = $this->strReplace('validation_rules', $rules, $stub);
-
-        return $this;
+        return $this->replaceTemplate('validation_rules', $rules, $stub);
     }
-
     /**
      * Replaces the field's name for the given stub.
      *
@@ -141,11 +139,8 @@ trait GeneratorReplacers
      */
     protected function replaceFieldName(&$stub, $name)
     {
-        $stub = $this->strReplace('field_name', $name, $stub);
-
-        return $this;
+        return $this->replaceTemplate('field_name', $name, $stub);
     }
-
     /**
      * Gets a model.
      *
@@ -157,7 +152,6 @@ trait GeneratorReplacers
     {
         return ucwords($name);
     }
-
     /**
      * Gets a model name.
      *
@@ -169,7 +163,6 @@ trait GeneratorReplacers
     {
         return snake_case($name);
     }
-
     /**
      * Gets a model name in a plural formal.
      *
@@ -179,9 +172,8 @@ trait GeneratorReplacers
      */
     protected function getModelPluralName($name)
     {
-        return str_plural(strtolower($name));
+        return Str::plural(strtolower($name));
     }
-
     /**
      * Gets a model name in a plural formal "Caps".
      *
@@ -193,5 +185,4 @@ trait GeneratorReplacers
     {
         return ucwords($this->getModelPluralName($name));
     }
-    
 }

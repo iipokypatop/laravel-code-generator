@@ -2,10 +2,10 @@
 
 namespace CrestApps\CodeGenerator\Commands;
 
-use CrestApps\CodeGenerator\Support\ViewsCommand;
-use CrestApps\CodeGenerator\Support\GenerateFormViews;
+use CrestApps\CodeGenerator\Commands\Bases\ViewsCommandBase;
+use CrestApps\CodeGenerator\Models\Resource;
 
-class CreateFormViewCommand extends ViewsCommand
+class CreateFormViewCommand extends ViewsCommandBase
 {
     /**
      * The name and signature of the console command.
@@ -14,11 +14,10 @@ class CreateFormViewCommand extends ViewsCommand
      */
     protected $signature = 'create:form-view
                             {model-name : The model name that this view will represent.}
-                            {--fields= : The fields to define the model.}
-                            {--fields-file= : File name to import fields from.}
+                            {--resource-file= : The name of the resource-file to import from.}
                             {--views-directory= : The name of the directory to create the views under.}
-                            {--routes-prefix= : The routes prefix.}
-                            {--lang-file-name= : The name of the language file.}
+                            {--routes-prefix=default-form : Prefix of the route group.}
+                            {--language-filename= : The name of the language file.}
                             {--layout-name=layouts.app : This will extract the validation into a request form class.}
                             {--template-name= : The template name to use when generating the code.}
                             {--force : This option will override the view if one already exists.}';
@@ -48,20 +47,20 @@ class CreateFormViewCommand extends ViewsCommand
     protected function handleCreateView()
     {
         $input = $this->getCommandInput();
-        $fields = $this->getFields($input->fields, $input->languageFileName, $input->fieldsFile);
+        $resources = Resource::fromFile($input->resourceFile, $input->languageFileName);
         $destenationFile = $this->getDestinationViewFullname($input->viewsDirectory, $input->prefix, 'form');
 
-        if ($this->canCreateView($destenationFile, $input->force, $fields)) {
+        if ($this->canCreateView($destenationFile, $input->force, $resources->fields)) {
             $stub = $this->getStub();
-            $htmlCreator = $this->getHtmlGenerator($fields, $input->modelName, $this->getTemplateName());
-            $headers = $this->getHeaderFieldAccessor($fields, $input->modelName);
+            $htmlCreator = $this->getHtmlGenerator($resources->fields, $input->modelName, $this->getTemplateName());
+            $headers = $this->getHeaderFieldAccessor($resources->fields, $input->modelName);
 
-            $this->createLanguageFile($input->languageFileName, $input->fields, $input->fieldsFile, $input->modelName)
-                 ->replaceCommonTemplates($stub, $input, $fields)
-                 ->replaceFields($stub, $htmlCreator->getHtmlFields())
-                 ->replaceModelHeader($stub, $headers)
-                 ->createFile($destenationFile, $stub)
-                 ->info('Form view was crafted successfully.');
+            $this->createLanguageFile($input->languageFileName, $input->resourceFile, $input->modelName)
+                ->replaceCommonTemplates($stub, $input, $resources->fields)
+                ->replaceFields($stub, $htmlCreator->getHtmlFields())
+                ->replaceModelHeader($stub, $headers)
+                ->createFile($destenationFile, $stub)
+                ->info('Form view was crafted successfully.');
         }
     }
 
@@ -75,8 +74,6 @@ class CreateFormViewCommand extends ViewsCommand
      */
     protected function replaceFields(&$stub, $fields)
     {
-        $stub = $this->strReplace('form_fields_html', $fields, $stub);
-
-        return $this;
+        return $this->replaceTemplate('form_fields_html', $fields, $stub);
     }
 }

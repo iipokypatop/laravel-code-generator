@@ -2,9 +2,10 @@
 
 namespace CrestApps\CodeGenerator\Commands;
 
-use CrestApps\CodeGenerator\Support\ViewsCommand;
+use CrestApps\CodeGenerator\Commands\Bases\ViewsCommandBase;
+use CrestApps\CodeGenerator\Models\Resource;
 
-class CreateCreateViewCommand extends ViewsCommand
+class CreateCreateViewCommand extends ViewsCommandBase
 {
     /**
      * The name and signature of the console command.
@@ -13,11 +14,10 @@ class CreateCreateViewCommand extends ViewsCommand
      */
     protected $signature = 'create:create-view
                             {model-name : The model name that this view will represent.}
-                            {--fields= : The fields to define the model.}
-                            {--fields-file= : File name to import fields from.}
+                            {--resource-file= : The name of the resource-file to import from.}
                             {--views-directory= : The name of the directory to create the views under.}
-                            {--routes-prefix= : The routes prefix.}
-                            {--lang-file-name= : The name of the language file.}
+                            {--routes-prefix=default-form : Prefix of the route group.}
+                            {--language-filename= : The name of the language file.}
                             {--layout-name=layouts.app : This will extract the validation into a request form class.}
                             {--template-name= : The template name to use when generating the code.}
                             {--force : This option will override the view if one already exists.}';
@@ -38,7 +38,7 @@ class CreateCreateViewCommand extends ViewsCommand
     {
         return 'create.blade';
     }
-    
+
     /**
      * Execute the console command.
      *
@@ -47,20 +47,46 @@ class CreateCreateViewCommand extends ViewsCommand
     protected function handleCreateView()
     {
         $input = $this->getCommandInput();
-        $fields = $this->getFields($input->fields, $input->languageFileName, $input->fieldsFile);
+        $resources = Resource::fromFile($input->resourceFile, $input->languageFileName);
         $destenationFile = $this->getDestinationViewFullname($input->viewsDirectory, $input->prefix, 'create');
 
-        if ($this->canCreateView($destenationFile, $input->force, $fields)) {
+        if ($this->canCreateView($destenationFile, $input->force, $resources->fields)) {
             $stub = $this->getStub();
-            $headers = $this->getHeaderFieldAccessor($fields, $input->modelName);
+            $headers = $this->getHeaderFieldAccessor($resources->fields, $input->modelName);
 
-            $this->createLanguageFile($input->languageFileName, $input->fields, $input->fieldsFile, $input->modelName)
-                 ->createMissingViews($input)
-                 ->replaceCommonTemplates($stub, $input, $fields)
-                 ->replaceFileUpload($stub, $fields)
-                 ->replaceModelHeader($stub, $headers)
-                 ->createFile($destenationFile, $stub)
-                 ->info('Create view was crafted successfully.');
+            $this->createLanguageFile($input->languageFileName, $input->resourceFile, $input->modelName)
+                ->createMissingViews($input)
+                ->replaceCommonTemplates($stub, $input, $resources->fields)
+                ->replaceFileUpload($stub, $resources->fields)
+                ->replaceModelHeader($stub, $headers)
+                ->replaceFormId($stub, $this->getFormId($input->modelName))
+                ->replaceFormName($stub, $this->getFormName($input->modelName))
+                ->createFile($destenationFile, $stub)
+                ->info('Create view was crafted successfully.');
         }
+    }
+
+    /**
+     * Gets te create form name
+     *
+     * @param string $modelName
+     *
+     * @return string
+     */
+    protected function getFormName($modelName)
+    {
+        return sprintf('create_%s_form', snake_case($modelName));
+    }
+
+    /**
+     * Gets te create form id
+     *
+     * @param string $modelName
+     *
+     * @return string
+     */
+    protected function getFormId($modelName)
+    {
+        return sprintf('create_%s_form', snake_case($modelName));
     }
 }

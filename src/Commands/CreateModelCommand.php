@@ -2,13 +2,15 @@
 
 namespace CrestApps\CodeGenerator\Commands;
 
-use Illuminate\Console\Command;
-use CrestApps\CodeGenerator\Traits\CommonCommand;
-use CrestApps\CodeGenerator\Support\Config;
-use CrestApps\CodeGenerator\Traits\GeneratorReplacers;
-use CrestApps\CodeGenerator\Support\Helpers;
 use CrestApps\CodeGenerator\Models\Field;
 use CrestApps\CodeGenerator\Models\ForeignRelationship;
+use CrestApps\CodeGenerator\Models\Resource;
+use CrestApps\CodeGenerator\Support\Config;
+use CrestApps\CodeGenerator\Support\FieldTransformer;
+use CrestApps\CodeGenerator\Support\Helpers;
+use CrestApps\CodeGenerator\Traits\CommonCommand;
+use CrestApps\CodeGenerator\Traits\GeneratorReplacers;
+use Illuminate\Console\Command;
 
 class CreateModelCommand extends Command
 {
@@ -29,11 +31,9 @@ class CreateModelCommand extends Command
     protected $signature = 'create:model
                             {model-name : The name of the model.}
                             {--table-name= : The name of the table.}
-                            {--fillable= : The exact string to put in the fillable property of the model.}
-                            {--relationships= : The relationships for the model.}
                             {--primary-key=id : The name of the primary key.}
-                            {--fields= : Fields to use for creating the validation rules.}
-                            {--fields-file= : File name to import fields from.}
+                            {--resource-file= : The name of the resource-file to import from.}
+                            {--language-filename= : The languages file name to put the labels in.}
                             {--model-directory= : The directory where the model should be created.}
                             {--with-soft-delete : Enables softdelete future should be enable in the model.}
                             {--without-timestamps : Prevent Eloquent from maintaining both created_at and the updated_at properties.}
@@ -64,37 +64,37 @@ class CreateModelCommand extends Command
         $stub = $this->getStubContent('model');
         $input = $this->getCommandInput();
 
-        $fields = $this->getFields($input->fields, 'model', $input->fieldsFile);
-        
+        $resources = Resource::fromFile($input->resourceFile, $input->languageFileName);
+        $fields = $resources->fields;
         if ($input->useSoftDelete) {
             $fields = $this->upsertDeletedAt($fields);
         }
 
         $primaryKey = $this->getNewPrimaryKey($this->getPrimaryKeyName($fields, $input->primaryKey));
         $destenationFile = $this->getDestenationFile($input->modelName, $input->modelDirectory);
-        
+
         if ($this->alreadyExists($destenationFile)) {
-            $this->error('The model already exists! To override the existing file, use --force option.');
+            $this->error('The model already exists!');
 
             return false;
         }
 
-        $relations = $this->getRelationMethods($input->relationships, $fields);
+        $relations = $this->getRelationMethods($resources->relations, $fields);
 
         return $this->replaceTable($stub, $input->table)
-                    ->replaceModelName($stub, $input->modelName)
-                    ->replaceNamespace($stub, $this->getNamespace($input->modelName, $input->modelDirectory))
-                    ->replaceSoftDelete($stub, $input->useSoftDelete)
-                    ->replaceTimestamps($stub, $this->getTimeStampsStub($input->useTimeStamps))
-                    ->replaceFillable($stub, $this->getFillables($stub, $input->fillable, $fields))
-                    ->replaceDateFields($stub, $this->getDateFields($stub, $fields))
-                    ->replaceCasts($stub, $this->getCasts($stub, $fields))
-                    ->replacePrimaryKey($stub, $primaryKey)
-                    ->replaceRelationshipPlaceholder($stub, $relations)
-                    ->replaceAccessors($stub, $this->getAccessors($fields))
-                    ->replaceMutators($stub, $this->getMutators($fields))
-                    ->createFile($destenationFile, $stub)
-                    ->info('A model was crafted successfully.');
+            ->replaceModelName($stub, $input->modelName)
+            ->replaceNamespace($stub, $this->getNamespace($input->modelName, $input->modelDirectory))
+            ->replaceSoftDelete($stub, $input->useSoftDelete)
+            ->replaceTimestamps($stub, $this->getTimeStampsStub($input->useTimeStamps))
+            ->replaceFillable($stub, $this->getFillables($stub, $fields))
+            ->replaceDateFields($stub, $this->getDateFields($stub, $fields))
+            ->replaceCasts($stub, $this->getCasts($stub, $fields))
+            ->replacePrimaryKey($stub, $primaryKey)
+            ->replaceRelationshipPlaceholder($stub, $relations)
+            ->replaceAccessors($stub, $this->getAccessors($fields))
+            ->replaceMutators($stub, $this->getMutators($fields))
+            ->createFile($destenationFile, $stub)
+            ->info('A model was crafted successfully.');
     }
 
     /**
@@ -107,12 +107,11 @@ class CreateModelCommand extends Command
      */
     protected function getDestenationFile($name, $path)
     {
-
         if (!empty($path)) {
             $path = Helpers::getPathWithSlash(ucfirst($path));
         }
 
-        return app_path(Config::getModelsPath($path. $name . '.php'));
+        return app_path(Config::getModelsPath($path . $name . '.php'));
     }
 
     /**
@@ -171,14 +170,14 @@ class CreateModelCommand extends Command
      */
     protected function getNewDeletedAtField()
     {
-        $field = new Field('deleted_at');
+        $field = current(FieldTransformer::fromString('deleted_at'));
         $field->isDate = true;
         $field->dataType = 'datetime';
         $field->dateFormat = Config::getDateTimeFormat();
 
         return $field;
     }
-    
+
     /**
      * Gets the formatted fillable line.
      *
@@ -188,13 +187,18 @@ class CreateModelCommand extends Command
      *
      * @return string
      */
-    protected function getFillables($stub, $fillables, array $fields)
+    protected function getFillables($stub, array $fields)
     {
-        if (!empty($fillables)) {
-            return $this->getFillablesFromString($stub, $fillables);
+        $fillables = [];
+        $indentCount = $this->getIndent($stub, $this->getTemplateVariable('fillable'));
+        $indent = $this->Indent($indentCount - $this->backspaceCount);
+        foreach ($fields as $field) {
+            if ($field->isOnFormView) {
+                $fillables[] = sprintf("%s'%s'", $indent, $field->name);
+            }
         }
 
-        return $this->getFillablefields($stub, $fields);
+        return $this->makeArrayString($fillables, $indentCount - $this->backspaceCount - 4);
     }
 
     /**
@@ -217,28 +221,6 @@ class CreateModelCommand extends Command
 
         foreach ($columns as $column) {
             $fillables[$column] = sprintf("%s'%s'", $index, $column);
-        }
-
-        return $this->makeArrayString($fillables, $indentCount - $this->backspaceCount - 4);
-    }
-
-    /**
-     * Gets the fillable string from a giving fields array.
-     *
-     * @param string $stub
-     * @param array $fields
-     *
-     * @return string
-     */
-    protected function getFillablefields($stub, array $fields)
-    {
-        $fillables = [];
-        $indentCount = $this->getIndent($stub, $this->getTemplateVariable('fillable'));
-        $indent = $this->Indent($indentCount - $this->backspaceCount);
-        foreach ($fields as $field) {
-            if ($field->isOnFormView) {
-                $fillables[] = sprintf("%s'%s'", $indent, $field->name);
-            }
         }
 
         return $this->makeArrayString($fillables, $indentCount - $this->backspaceCount - 4);
@@ -284,7 +266,7 @@ class CreateModelCommand extends Command
                 $casts[$field->name] = sprintf("%s'%s' => '%s'", $indent, $field->name, $field->castAs);
             }
         }
-        
+
         return $this->makeArrayString($casts, $indentCount - $this->backspaceCount - 4);
     }
 
@@ -315,19 +297,27 @@ class CreateModelCommand extends Command
     protected function getCommandInput()
     {
         $modelName = trim($this->argument('model-name'));
-        $table = trim($this->option('table-name')) ?: $this->makeTableName($modelName);
-        $fillable = trim($this->option('fillable'));
+        $table = trim($this->option('table-name')) ?: Helpers::makeTableName($modelName);
         $primaryKey = trim($this->option('primary-key'));
-        $relationships = !empty(trim($this->option('relationships'))) ? explode(',', trim($this->option('relationships'))) : [];
         $useSoftDelete = $this->option('with-soft-delete');
         $useTimeStamps = !$this->option('without-timestamps');
-        $fields = trim($this->option('fields'));
 
         $modelDirectory = trim($this->option('model-directory'));
-        $fieldsFile = trim($this->option('fields-file')) ?: Helpers::makeJsonFileName($modelName);
+        $resourceFile = trim($this->option('resource-file')) ?: Helpers::makeJsonFileName($modelName);
+        $languageFileName = $this->option('language-filename') ?: Helpers::makeLocaleGroup($modelName);
         $template = $this->getTemplateName();
 
-        return (object) compact('table', 'fillable', 'primaryKey', 'relationships', 'useSoftDelete', 'useTimeStamps', 'fields', 'fieldsFile', 'template', 'modelName','modelDirectory');
+        return (object) compact(
+            'table',
+            'primaryKey',
+            'useSoftDelete',
+            'useTimeStamps',
+            'resourceFile',
+            'template',
+            'modelName',
+            'modelDirectory',
+            'languageFileName'
+        );
     }
 
     /**
@@ -338,27 +328,19 @@ class CreateModelCommand extends Command
      *
      * @return array
      */
-    protected function getRelationMethods(array $relationships, array $fields)
+    protected function getRelationMethods(array $relations, array $fields)
     {
         $methods = [];
-
-        foreach ($relationships as $relationship) {
-            $relationshipParts = explode('#', $relationship);
-
-            if (count($relationshipParts) != 3) {
-                throw new Exception("One or more of the provided relations are not formatted correctly. Make sure your input adheres to the following pattern 'posts#hasMany#App\Post|id|post_id'");
-            }
-
-            $methodArguments = explode('|', trim($relationshipParts[2]));
-            $relation = new ForeignRelationship(trim($relationshipParts[1]), $methodArguments, trim($relationshipParts[0]));
-            $methods[$name] = $this->getRelationshipMethod($relation);
-        }
 
         foreach ($fields as $field) {
             if ($field->hasForeignRelation()) {
                 $relation = $field->getForeignRelation();
                 $methods[$relation->name] = $this->getRelationshipMethod($relation);
             }
+        }
+
+        foreach ($relations as $relation) {
+            $methods[$relation->name] = $this->getRelationshipMethod($relation);
         }
 
         return $methods;
@@ -388,7 +370,7 @@ class CreateModelCommand extends Command
         $accessors = [];
 
         foreach ($fields as $field) {
-            if ($field->isMultipleAnswers) {
+            if ($field->isMultipleAnswers()) {
                 $content = $this->getStubContent('model-accessor-multiple-answers');
 
                 $accessors[] = $this->getAccessor($field, $content);
@@ -420,8 +402,8 @@ class CreateModelCommand extends Command
             if ($field->isAutoManaged()) {
                 continue;
             }
-            
-            if ($field->isMultipleAnswers) {
+
+            if ($field->isMultipleAnswers()) {
                 $content = $this->getStubContent('model-mutator-multiple-answers');
                 $this->replaceFieldName($content, $field->name);
 
@@ -451,7 +433,7 @@ class CreateModelCommand extends Command
         $stub = $this->getStubContent('model-accessor');
 
         $this->replaceFieldName($stub, $field->name)
-             ->replaceFieldContent($stub, $content);
+            ->replaceFieldContent($stub, $content);
 
         return $stub;
     }
@@ -469,7 +451,7 @@ class CreateModelCommand extends Command
         $stub = $this->getStubContent('model-mutator');
 
         $this->replaceFieldName($stub, $field->name)
-             ->replaceFieldContent($stub, $content);
+            ->replaceFieldContent($stub, $content);
 
         return $stub;
     }
@@ -486,8 +468,8 @@ class CreateModelCommand extends Command
         $stub = $this->getStubContent('model-relation');
 
         $this->replaceRelationName($stub, $relation->name)
-             ->replaceRelationType($stub, $relation->getType())
-             ->replaceRelationParams($stub, $this->turnRelationArgumentToString($relation->parameters));
+            ->replaceRelationType($stub, $relation->getType())
+            ->replaceRelationParams($stub, $this->turnRelationArgumentToString($relation->parameters));
 
         return $stub;
     }
@@ -532,9 +514,7 @@ class CreateModelCommand extends Command
      */
     protected function replaceDateFormat(&$stub, $format)
     {
-        $stub = $this->strReplace('date_format', $format, $stub);
-
-        return $this;
+        return $this->replaceTemplate('date_format', $format, $stub);
     }
 
     /**
@@ -547,9 +527,7 @@ class CreateModelCommand extends Command
      */
     protected function replaceFieldContent(&$stub, $content)
     {
-        $stub = $this->strReplace('content', $content, $stub);
-
-        return $this;
+        return $this->replaceTemplate('content', $content, $stub);
     }
 
     /**
@@ -562,9 +540,7 @@ class CreateModelCommand extends Command
      */
     protected function replaceTable(&$stub, $table)
     {
-        $stub = $this->strReplace('table', $table, $stub);
-
-        return $this;
+        return $this->replaceTemplate('table', $table, $stub);
     }
 
     /**
@@ -577,9 +553,7 @@ class CreateModelCommand extends Command
      */
     protected function replaceAccessors(&$stub, $accessors)
     {
-        $stub = $this->strReplace('accessors', $accessors, $stub);
-
-        return $this;
+        return $this->replaceTemplate('accessors', $accessors, $stub);
     }
 
     /**
@@ -592,9 +566,7 @@ class CreateModelCommand extends Command
      */
     protected function replaceDateFields(&$stub, $dates)
     {
-        $stub = $this->strReplace('dates', $dates, $stub);
-
-        return $this;
+        return $this->replaceTemplate('dates', $dates, $stub);
     }
 
     /**
@@ -607,9 +579,7 @@ class CreateModelCommand extends Command
      */
     protected function replaceCasts(&$stub, $casts)
     {
-        $stub = $this->strReplace('casts', $casts, $stub);
-
-        return $this;
+        return $this->replaceTemplate('casts', $casts, $stub);
     }
 
     /**
@@ -622,9 +592,7 @@ class CreateModelCommand extends Command
      */
     protected function replaceDelimiter(&$stub, $delimiter)
     {
-        $stub = $this->strReplace('delimiter', $delimiter, $stub);
-
-        return $this;
+        return $this->replaceTemplate('delimiter', $delimiter, $stub);
     }
 
     /**
@@ -637,9 +605,7 @@ class CreateModelCommand extends Command
      */
     protected function replaceMutators(&$stub, $mutators)
     {
-        $stub = $this->strReplace('mutators', $mutators, $stub);
-
-        return $this;
+        return $this->replaceTemplate('mutators', $mutators, $stub);
     }
 
     /**
@@ -691,9 +657,7 @@ class CreateModelCommand extends Command
      */
     protected function replaceFillable(&$stub, $fillable)
     {
-        $stub = $this->strReplace('fillable', $fillable, $stub);
-
-        return $this;
+        return $this->replaceTemplate('fillable', $fillable, $stub);
     }
 
     /**
@@ -706,9 +670,7 @@ class CreateModelCommand extends Command
      */
     protected function replacePrimaryKey(&$stub, $primaryKey)
     {
-        $stub = $this->strReplace('primary_key', $primaryKey, $stub);
-
-        return $this;
+        return $this->replaceTemplate('primary_key', $primaryKey, $stub);
     }
 
     /**
@@ -721,10 +683,9 @@ class CreateModelCommand extends Command
      */
     protected function replaceRelationshipPlaceholder(&$stub, array $relationMethods)
     {
-        $stub = $this->strReplace('relationships', implode("\r\n", $relationMethods), $stub);
-
-        return $this;
+        return $this->replaceTemplate('relationships', implode("\r\n", $relationMethods), $stub);
     }
+
     /**
      * Replaces the replation type for the giving stub.
      *
@@ -735,9 +696,7 @@ class CreateModelCommand extends Command
      */
     protected function replaceRelationType(&$stub, $type)
     {
-        $stub = $this->strReplace('relation_type', $type, $stub);
-
-        return $this;
+        return $this->replaceTemplate('relation_type', $type, $stub);
     }
 
     /**
@@ -750,9 +709,7 @@ class CreateModelCommand extends Command
      */
     protected function replaceRelationName(&$stub, $name)
     {
-        $stub = $this->strReplace('relation_name', $name, $stub);
-
-        return $this;
+        return $this->replaceTemplate('relation_name', $name, $stub);
     }
 
     /**
@@ -765,9 +722,7 @@ class CreateModelCommand extends Command
      */
     protected function replaceRelationParams(&$stub, $params)
     {
-        $stub = $this->strReplace('relation_params', $params, $stub);
-
-        return $this;
+        return $this->replaceTemplate('relation_params', $params, $stub);
     }
 
     /**
@@ -780,8 +735,6 @@ class CreateModelCommand extends Command
      */
     protected function replaceTimestamps(&$stub, $timestamp)
     {
-        $stub = $this->strReplace('time_stamps', $timestamp, $stub);
-        
-        return $this;
+        return $this->replaceTemplate('time_stamps', $timestamp, $stub);
     }
 }

@@ -2,10 +2,11 @@
 
 namespace CrestApps\CodeGenerator\Commands;
 
-use CrestApps\CodeGenerator\Support\ViewsCommand;
+use CrestApps\CodeGenerator\Commands\Bases\ViewsCommandBase;
+use CrestApps\CodeGenerator\Models\Resource;
 use CrestApps\CodeGenerator\Support\Helpers;
 
-class CreateViewsCommand extends ViewsCommand
+class CreateViewsCommand extends ViewsCommandBase
 {
     /**
      * The name and signature of the console command.
@@ -14,11 +15,10 @@ class CreateViewsCommand extends ViewsCommand
      */
     protected $signature = 'create:views
                             {model-name : The model name that this view will represent.}
-                            {--fields= : The fields to define the model.}
-                            {--fields-file= : File name to import fields from.}
+                            {--resource-file= : The name of the resource-file to import from.}
                             {--views-directory= : The name of the directory to create the views under.}
-                            {--routes-prefix= : The routes prefix.}
-                            {--lang-file-name= : The name of the language file.}
+                            {--routes-prefix=default-form : Prefix of the route group.}
+                            {--language-filename= : The name of the language file.}
                             {--only-views=form,create,edit,show,index : The only views to be created.}
                             {--layout-name=layouts.app : This will extract the validation into a request form class.}
                             {--template-name= : The template name to use when generating the code.}
@@ -49,9 +49,9 @@ class CreateViewsCommand extends ViewsCommand
     protected function handleCreateView()
     {
         $input = $this->getCommandInput();
-        $fields = $this->getFields($input->fields, $input->languageFileName, $input->fieldsFile);
+        $resources = Resource::fromFile($input->resourceFile, $input->languageFileName);
 
-        if ($this->isMetRequirements($fields)) {
+        if ($this->isMetRequirements($resources->fields)) {
             $this->info('Crafting views...');
 
             foreach ($this->getOnlyViews() as $view) {

@@ -11,70 +11,63 @@ class ResourceInput
      */
     public $modelName;
 
-     /**
+    /**
      * The controller name
      *
      * @var string
      */
     public $controllerName;
 
-     /**
+    /**
      * The prefix
      *
      * @var string
      */
     public $prefix;
 
-     /**
+    /**
      * The language file
      *
      * @var string
      */
     public $languageFileName;
 
-     /**
+    /**
      * The table name
      *
      * @var string
      */
     public $table;
 
-     /**
+    /**
      * The views directory
      *
      * @var string
      */
     public $viewsDirectory;
 
-     /**
+    /**
      * Total models per page
      *
      * @var int
      */
     public $perPage = 25;
 
-     /**
-     * The raw fields
-     *
-     * @var string
-     */
-    public $fields;
-
-     /**
+    /**
      * The fields file
      *
      * @var string
      */
-    public $fieldsFile;
+    public $resourceFile;
 
-     /**
+    /**
      * With form-request
      *
      * @var bool
      */
     public $formRequest = false;
 
-     /**
+    /**
      * The controller directory
      *
      * @var string
@@ -88,21 +81,21 @@ class ResourceInput
      */
     public $controllerExtends;
 
-     /**
+    /**
      * Without migration
      *
      * @var bool
      */
-    public $withoutMigration = false;
+    public $withMigration = false;
 
-     /**
+    /**
      * Override existing files
      *
      * @var bool
      */
     public $force = false;
 
-     /**
+    /**
      * Models directory
      *
      * @var string
@@ -110,25 +103,11 @@ class ResourceInput
     public $modelDirectory;
 
     /**
-     * Fillable
-     *
-     * @var string
-     */
-    public $fillable;
-    
-    /**
      * Primary key
      *
      * @var string
      */
     public $primaryKey;
-
-    /**
-     * Relationship
-     *
-     * @var string
-     */
-    public $relationships;
 
     /**
      * With soft delete
@@ -143,7 +122,7 @@ class ResourceInput
      * @var bool
      */
     public $withoutTimeStamps;
-    
+
     /**
      * migration class name
      *
@@ -158,20 +137,6 @@ class ResourceInput
      */
     public $connectionName;
 
-     /**
-     * The indexes
-     *
-     * @var string
-     */
-    public $indexes;
-    
-    /**
-     * The foreign key
-     *
-     * @var string
-     */
-    public $foreignKeys;
-    
     /**
      * The database engine name
      *

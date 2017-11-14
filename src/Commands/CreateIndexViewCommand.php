@@ -2,10 +2,10 @@
 
 namespace CrestApps\CodeGenerator\Commands;
 
-use CrestApps\CodeGenerator\Support\ViewsCommand;
-use CrestApps\CodeGenerator\Support\GenerateFormViews;
+use CrestApps\CodeGenerator\Commands\Bases\ViewsCommandBase;
+use CrestApps\CodeGenerator\Models\Resource;
 
-class CreateIndexViewCommand extends ViewsCommand
+class CreateIndexViewCommand extends ViewsCommandBase
 {
     /**
      * The name and signature of the console command.
@@ -14,11 +14,10 @@ class CreateIndexViewCommand extends ViewsCommand
      */
     protected $signature = 'create:index-view
                             {model-name : The model name that this view will represent.}
-                            {--fields= : The fields to define the model.}
-                            {--fields-file= : File name to import fields from.}
+                            {--resource-file= : The name of the resource-file to import from.}
                             {--views-directory= : The name of the directory to create the views under.}
-                            {--routes-prefix= : The routes prefix.}
-                            {--lang-file-name= : The name of the language file.}
+                            {--routes-prefix=default-form : Prefix of the route group.}
+                            {--language-filename= : The name of the language file.}
                             {--layout-name=layouts.app : This will extract the validation into a request form class.}
                             {--template-name= : The template name to use when generating the code.}
                             {--force : This option will override the view if one already exists.}';
@@ -48,20 +47,20 @@ class CreateIndexViewCommand extends ViewsCommand
     protected function handleCreateView()
     {
         $input = $this->getCommandInput();
-        $fields = $this->getFields($input->fields, $input->languageFileName, $input->fieldsFile);
+        $resources = Resource::fromFile($input->resourceFile, $input->languageFileName);
         $destenationFile = $this->getDestinationViewFullname($input->viewsDirectory, $input->prefix, 'index');
 
-        if ($this->canCreateView($destenationFile, $input->force, $fields)) {
+        if ($this->canCreateView($destenationFile, $input->force, $resources->fields)) {
             $stub = $this->getStub();
-            $htmlCreator = $this->getHtmlGenerator($fields, $input->modelName, $this->getTemplateName());
+            $htmlCreator = $this->getHtmlGenerator($resources->fields, $input->modelName, $this->getTemplateName());
 
-            $this->replaceCommonTemplates($stub, $input, $fields)
-                 ->replacePrimaryKey($stub, $this->getPrimaryKeyName($fields))
-                 ->replaceHeaderCells($stub, $htmlCreator->getIndexHeaderCells())
-                 ->replaceBodyCells($stub, $htmlCreator->getIndexBodyCells())
-                 ->replaceModelHeader($stub, $this->getHeaderFieldAccessor($fields, $input->modelName))
-                 ->createFile($destenationFile, $stub)
-                 ->info('Index view was crafted successfully.');
+            $this->replaceCommonTemplates($stub, $input, $resources->fields)
+                ->replacePrimaryKey($stub, $this->getPrimaryKeyName($resources->fields))
+                ->replaceHeaderCells($stub, $htmlCreator->getIndexHeaderCells())
+                ->replaceBodyCells($stub, $htmlCreator->getIndexBodyCells())
+                ->replaceModelHeader($stub, $this->getHeaderFieldAccessor($resources->fields, $input->modelName))
+                ->createFile($destenationFile, $stub)
+                ->info('Index view was crafted successfully.');
         }
     }
 
@@ -75,9 +74,7 @@ class CreateIndexViewCommand extends ViewsCommand
      */
     protected function replaceHeaderCells(&$stub, $header)
     {
-        $stub = $this->strReplace('header_cells', $header, $stub);
-
-        return $this;
+        return $this->replaceTemplate('header_cells', $header, $stub);
     }
 
     /**
@@ -90,8 +87,6 @@ class CreateIndexViewCommand extends ViewsCommand
      */
     protected function replaceBodyCells(&$stub, $body)
     {
-        $stub = $this->strReplace('body_cells', $body, $stub);
-
-        return $this;
+        return $this->replaceTemplate('body_cells', $body, $stub);
     }
 }

@@ -2,21 +2,25 @@
 
 namespace CrestApps\CodeGenerator\Models;
 
+use CrestApps\CodeGenerator\Support\Config;
+use CrestApps\CodeGenerator\Support\Contracts\JsonWriter;
+use CrestApps\CodeGenerator\Support\Helpers;
+use CrestApps\CodeGenerator\Support\ResourceMapper;
+use CrestApps\CodeGenerator\Support\Str;
 use DB;
 use Exception;
+use File;
 use Illuminate\Database\Eloquent\Model;
-use CrestApps\CodeGenerator\Support\Helpers;
-use CrestApps\CodeGenerator\Support\Config;
 
-class ForeignRelationship
+class ForeignRelationship implements JsonWriter
 {
     /**
      * The allowed relation types.
      *
      * @var array
      */
-    private $allowedTypes =
-    [
+    public static $allowedTypes =
+        [
         'hasOne',
         'belongsTo',
         'hasMany',
@@ -24,9 +28,9 @@ class ForeignRelationship
         'hasManyThrough',
         'morphTo',
         'morphMany',
-        'morphToMany'
+        'morphToMany',
     ];
-    
+
     /**
      * The type of the relation.
      *
@@ -40,7 +44,7 @@ class ForeignRelationship
      * @var array
      */
     public $parameters = [];
-    
+
     /**
      * The name of the property/field's name on the foreign model to represent the field on display.
      *
@@ -55,7 +59,7 @@ class ForeignRelationship
      */
     public $name;
 
-   /**
+    /**
      * Instance of the foreign model.
      *
      * @var Illuminate\Database\Eloquent\Model
@@ -90,7 +94,7 @@ class ForeignRelationship
         return in_array($this->type, [
             'hasOne',
             'belongsTo',
-            'morphTo'
+            'morphTo',
         ]);
     }
 
@@ -103,11 +107,23 @@ class ForeignRelationship
      */
     public function setType($type)
     {
-        if (!in_array($type, $this->allowedTypes)) {
+        if (!self::isValidType($type)) {
             throw new OutOfRangeException();
         }
 
         $this->type = $type;
+    }
+
+    /**
+     * Check if the relation's type is valid.
+     *
+     * @param string $type
+     *
+     * @return bool
+     */
+    public static function isValidType($type)
+    {
+        return in_array($type, self::$allowedTypes);
     }
 
     /**
@@ -121,7 +137,7 @@ class ForeignRelationship
     {
         $this->field = $name;
     }
-    
+
     /**
      * Get the foreign field name.
      *
@@ -137,32 +153,40 @@ class ForeignRelationship
     }
 
     /**
+     * Get the relation name.
+     *
+     * @return string
+     */
+    public function getName()
+    {
+        return $this->name;
+    }
+
+    /**
      * Guesses the name of the foreign key.
      *
      * @return string
      */
     protected function guessForeignField()
     {
+        // First we try to find a column that match the header pattern
         $columns = $this->getModelColumns();
         $names = Config::getHeadersPatterns();
-
         foreach ($columns as $column) {
-            $matchedPattern = '';
-            if (Helpers::strIs($names, $column, $matchedPattern)) {
+            if (Helpers::strIs($names, $column)) {
+                // At this point a column that match the header patter was found
                 return $column;
             }
         }
 
+        // At this point we know no column that match the header patters found.
+        // Second we try to find a non-primary/non-foreign key column
         $primary = $this->getPrimaryKeyForForeignModel();
-        $datetimePatterns = config('codegenerator.common_datetime_patterns') ?: [];
-        $idPatterns = config('codegenerator.common_id_patterns') ?: [];
-
-        $columns = array_filter($columns, function ($column) use ($primary, $idPatterns, $datetimePatterns) {
-            return $column != $primary && ! Helpers::strIs($idPatterns, $column) && ! Helpers::strIs($datetimePatterns, $column);
-        });
-
-        if (count($columns) == 1) {
-            return $columns[0];
+        $idPatterns = Config::getKeyPatterns();
+        foreach ($columns as $column) {
+            if ($column != $primary && !Helpers::strIs($idPatterns, $column)) {
+                return $column;
+            }
         }
 
         return $primary;
@@ -187,7 +211,7 @@ class ForeignRelationship
      */
     public function getCollectionName()
     {
-        return str_plural($this->name);
+        return Str::plural($this->name);
     }
 
     /**
@@ -197,7 +221,7 @@ class ForeignRelationship
      */
     public function getSingleName()
     {
-        return str_singular($this->name);
+        return Str::singular($this->name);
     }
 
     /**
@@ -228,7 +252,7 @@ class ForeignRelationship
         if ($position !== false) {
             return substr($model, $position + 1);
         }
-        
+
         return '';
     }
 
@@ -239,7 +263,7 @@ class ForeignRelationship
      */
     protected function isModel($model)
     {
-        return $model instanceof Modle;
+        return $model instanceof Model;
     }
 
     /**
@@ -255,7 +279,7 @@ class ForeignRelationship
             return $model->getKeyName();
         }
 
-        return 'id';
+        return $this->getKeyNameFromResource() ?: 'id';
     }
 
     /**
@@ -266,13 +290,83 @@ class ForeignRelationship
     public function getModelColumns()
     {
         $model = $this->getForeignModelInstance();
-
+        $columns = [];
         if ($this->isModel($model)) {
+            // At this point we know a model class exists
+            // Try to get the database column listing from the database directly
             $tableName = $model->getTable();
-            return DB::getSchemaBuilder()->getColumnListing($tableName);
+            $columns = DB::getSchemaBuilder()->getColumnListing($tableName);
+        }
+
+        if (count($columns) == 0) {
+            // At this poing we know the column have not yet been identified
+            // which also mean that the model does not exists or the table
+            // does not existing in the database.
+            // Try to find the columns from the resource-file if one found.
+            $columns = $this->getFieldNamesFromResource();
+        }
+
+        return $columns;
+    }
+
+    /**
+     * Gets the foreign model columns from the resource file if one exists
+     *
+     * @return null | string
+     */
+    protected function getKeyNameFromResource()
+    {
+        $resource = $this->getForeignResource();
+
+        if (!is_null($resource) && (($field = $resource->getPrimaryField()) != null)) {
+            return $field->name;
+        }
+
+        return null;
+    }
+
+    /**
+     * Gets the foreign model columns from the resource file if one exists
+     *
+     * @return array
+     */
+    protected function getFieldNamesFromResource()
+    {
+        $resource = $this->getForeignResource();
+
+        if (!is_null($resource)) {
+            return $resource->pluckFields();
         }
 
         return [];
+    }
+
+    /**
+     * Gets the foreign model fields from resource file
+     *
+     * @return mix (null | CrestApps\CodeGenerator\Models\Resource)
+     */
+    protected function getForeignResource()
+    {
+        $modelName = $this->getForeignModelName();
+        // Find the resource file from the resource-map or make a standard name.
+        $resourceFile = ResourceMapper::pluckFirst($modelName) ?: Helpers::makeJsonFileName($modelName);
+
+        if (File::exists(Config::getResourceFilePath($resourceFile))) {
+            return Resource::fromFile($resourceFile, 'crestapps');
+        }
+
+        return null;
+    }
+
+    /**
+     * Gets the foreign model's class name
+     *
+     * @return string
+     */
+    protected function getForeignModelName()
+    {
+        return class_basename($this->getFullForeignModel());
     }
 
     /**
@@ -307,10 +401,90 @@ class ForeignRelationship
     public function toArray()
     {
         return [
-            'name'      => $this->name,
-            'type'      => $this->getType(),
-            'params'    => $this->parameters,
-            'field'     => $this->getField()
-       ];
+            'name' => $this->name,
+            'type' => $this->getType(),
+            'params' => $this->parameters,
+            'field' => $this->getField(),
+        ];
     }
+
+    /**
+     * Get a foreign relationship from giving array
+     *
+     * @param array $options
+     *
+     * @return null | CrestApps\CodeGenerator\Model\ForeignRelationship
+     */
+    public static function get(array $options)
+    {
+        if (!array_key_exists('type', $options) || !array_key_exists('params', $options) || !array_key_exists('name', $options)) {
+            return null;
+        }
+
+        $field = array_key_exists('field', $options) ? $options['field'] : null;
+
+        return new ForeignRelationship(
+            $options['type'],
+            $options['params'],
+            $options['name'],
+            $field
+        );
+    }
+
+    /**
+     * Get a foreign relationship from giving string
+     *
+     * @param string $rawRelation
+     *
+     * @return null | CrestApps\CodeGenerator\Model\ForeignRelationship
+     */
+    public static function fromString($rawRelation)
+    {
+        //name:assets;type:hasMany;params:App\\Models\\Asset|category_id|id,
+        // expected string
+        //name|type|params|field
+        //assets|hasMany|App\\Models\\Asset,category_id,id|title
+
+        $parts = explode(';', $rawRelation);
+        $collection = [];
+        foreach ($parts as $part) {
+            if (!str_contains($part, ':')) {
+                continue;
+            }
+
+            list($key, $value) = explode(':', $part);
+
+            if ($key == 'params' || str_contains($value, '|')) {
+                $value = explode('|', $value);
+            }
+
+            $collection[$key] = $value;
+        }
+
+        return self::get($collection);
+    }
+
+    /**
+     * Get a predictable foreign relation using the giving field's name
+     *
+     * @param string $fieldName
+     * @param string $modelPath
+     *
+     * @return null | CrestApps\CodeGenerator\Model\ForeignRelationship
+     */
+    public static function predict($fieldName, $modelPath)
+    {
+        $patterns = Config::getKeyPatterns();
+
+        if (Helpers::strIs($patterns, $fieldName)) {
+            $relationName = camel_case(Helpers::extractModelName($fieldName));
+            $model = Helpers::guessModelFullName($fieldName, $modelPath);
+            $parameters = [$model, $fieldName];
+
+            return new self('belongsTo', $parameters, $relationName);
+        }
+
+        return null;
+    }
+
 }

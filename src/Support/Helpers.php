@@ -3,10 +3,9 @@
 namespace CrestApps\CodeGenerator\Support;
 
 use App;
-use File;
-use Exception;
-use CrestApps\CodeGenerator\Support\FieldTransformer;
 use CrestApps\CodeGenerator\Support\Config;
+use CrestApps\CodeGenerator\Support\Str;
+use File;
 
 class Helpers
 {
@@ -19,9 +18,59 @@ class Helpers
      */
     public static function makeControllerName($modelName)
     {
-        $plural = ucfirst(camel_case(str_plural(snake_case($modelName))));
-        
-        return str_finish($plural, 'Controller');
+        $name = self::getProperCaseFor($modelName, 'controller-name');
+        $case = ucfirst(camel_case($name));
+
+        if (!empty($postFix = Config::getControllerNamePostFix())) {
+            return str_finish($case, $postFix);
+        }
+
+        return $case;
+    }
+
+    /**
+     * Checks an array for the first value that starts with a giving pattern
+     *
+     * @param array $subjects
+     * @param string $search
+     *
+     * @return bool
+     */
+    public static function inArraySearch(array $subjects, $search)
+    {
+        foreach ($subjects as $subject) {
+            if (str_is($search . '*', $subject)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Converts array to a pretty JSON string.
+     *
+     * @param array $object
+     *
+     * @return string
+     */
+    public static function prettifyJson(array $object)
+    {
+        return json_encode($object, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    }
+
+    /**
+     * Gets a label from a giving name
+     *
+     * @param string $name
+     *
+     * @return string
+     */
+    public static function convertNameToLabel($name)
+    {
+        $title = ucwords(str_replace('_', ' ', $name));
+
+        return self::removePostFixWith($title, ' Id');
     }
 
     /**
@@ -32,8 +81,15 @@ class Helpers
      * @return string
      */
     public static function makeFormRequestName($modelName)
-    {        
-        return str_finish($modelName, 'FormRequest');
+    {
+        $name = self::getProperCaseFor($modelName, 'request-form-name');
+        $case = ucfirst(camel_case($name));
+
+        if (!empty($postFix = Config::getFormRequestNamePostFix())) {
+            return str_finish($case, $postFix);
+        }
+
+        return $case;
     }
 
     /**
@@ -73,35 +129,53 @@ class Helpers
     }
 
     /**
-     * Converts the give value into a title case.
+     * Guesses the model full name using the giving field's name
      *
-     * @param string $value
+     * @param string $name
+     * @param string $modelsPath
      *
      * @return string
      */
-    public static function titleCase($value)
+    public static function guessModelFullName($name, $modelsPath)
     {
-        if (function_exists('title_case')) {
-            return title_case($value);
-        }
-        
-        return Str::title($value);
+        $model = $modelsPath . ucfirst(self::extractModelName($name));
+
+        return self::convertSlashToBackslash($model);
     }
 
     /**
-     * Converts the give value into a title case.
+     * Extracts the model name from the giving field's name.
      *
-     * @param string $value
+     * @param string $name
      *
      * @return string
      */
-    public static function kebabCase($value)
+    public static function extractModelName($name)
     {
-        if (function_exists('kebab_case')) {
-            return kebab_case($value);
+        $name = self::removePostFixWith($name, '_id');
+
+        return ucfirst(studly_case(Str::singular($name)));
+    }
+
+    /**
+     * Checks if a key exists in a giving array
+     *
+     * @param array $properties
+     * @param string $name
+     *
+     * @return bool
+     */
+    public static function isKeyExists(array $properties, ...$name)
+    {
+        $args = func_get_args();
+
+        for ($i = 1; $i < count($args); $i++) {
+            if (!array_key_exists($args[$i], $properties)) {
+                return false;
+            }
         }
-        
-        return str_replace('_', '-', snake_case($value));
+
+        return true;
     }
 
     /**
@@ -113,7 +187,50 @@ class Helpers
      */
     public static function makeLocaleGroup($modelName)
     {
-        return str_plural(snake_case($modelName));
+        return self::getProperCaseFor($modelName, 'language-filename');
+    }
+
+    /**
+     * Makes the proper english case giving a model name and a file type
+     *
+     * @param string $modelName
+     * @param string $key
+     *
+     * @return string
+     */
+    public static function getProperCaseFor($modelName, $key = null)
+    {
+        $snake = snake_case($modelName);
+
+        if (Config::shouldBePlural($key)) {
+            return Str::plural($snake);
+        }
+
+        return $snake;
+    }
+
+    /**
+     * Makes the table name from the giving model name.
+     *
+     * @param  string  $modelName
+     *
+     * @return string
+     */
+    public static function makeTableName($modelName)
+    {
+        return self::getProperCaseFor($modelName, 'table-name');
+    }
+
+    /**
+     * Makes the route group from the giving model name.
+     *
+     * @param  string  $modelName
+     *
+     * @return string
+     */
+    public static function makeRouteGroup($modelName)
+    {
+        return self::getProperCaseFor($modelName, 'route-group');
     }
 
     /**
@@ -125,7 +242,9 @@ class Helpers
      */
     public static function makeJsonFileName($modelName)
     {
-        return self::makeLocaleGroup($modelName) . '.json';
+        $snake = self::getProperCaseFor($modelName, 'resource-file-name');
+
+        return str_finish($snake, '.json');
     }
 
     /**
@@ -135,17 +254,25 @@ class Helpers
      *
      * @return bool
      */
-    public static function isNewerThan($version = '5.3')
+    public static function isNewerThanOrEqualTo($version = '5.3')
     {
-        return version_compare(App::VERSION(), $version) > 0;
+        return version_compare(App::VERSION(), $version) >= 0;
     }
 
-
+    /**
+     * Replaces found pattern in a subject only one time.
+     *
+     * @param string $pattern
+     * @param string $replacment
+     * @param string $subject
+     *
+     * @return string
+     */
     public static function strReplaceOnce($pattern, $replacment, $subject)
     {
-        if (strpos($subject, $pattern) !== false) {
-            $occurrence = strpos($subject, $pattern);
-            return substr_replace($subject, $replacment, strpos($subject, $pattern), strlen($pattern));
+        $index = strpos($subject, $pattern);
+        if ($index !== false) {
+            return substr_replace($subject, $replacment, $index, strlen($pattern));
         }
 
         return $subject;
@@ -209,7 +336,7 @@ class Helpers
      */
     public static function convertToDotNotation($string)
     {
-        return str_replace(['/','\\'], '.', $string);
+        return str_replace(['/', '\\'], '.', $string);
     }
 
     /**
@@ -261,67 +388,24 @@ class Helpers
         if (is_bool($str)) {
             return $str;
         }
-        
-        return in_array(strtolower($str), ['true','yes','1','valid','correct']);
-    }
 
-    /**
-     * Converts a string of field to an array
-     *
-     * @param $fieldsLine
-     *
-     * @return array
-     */
-    public static function getFields($fieldsLine, $langFile = 'generic')
-    {
-        return FieldTransformer::fromText($fieldsLine, $langFile);
-    }
-
-    /**
-     * Converts a string of field to an array
-     *
-     * @param string $filename
-     * @param string $langFile
-     *
-     * @return array
-     */
-    public static function getFieldsFromFile($filename, $langFile = 'generic')
-    {
-        $content = self::jsonFileContent($filename);
-        
-        return FieldTransformer::fromJson($content, $langFile);
-    }
-
-    /**
-     * Gets the content of a json file.
-     *
-     * @param $filename
-     *
-     * @return string
-     */
-    public static function jsonFileContent($filename)
-    {
-        $fileFullname = Config::pathToFieldFiles($filename);
-
-        if (!File::exists($fileFullname)) {
-            throw new Exception('The file ' . $fileFullname . ' was not found!');
-        }
-
-        return File::get($fileFullname);
+        return in_array(strtolower($str), ['true', 'yes', '1', 'valid', 'correct']);
     }
 
     /**
      * Removes a string from the end of another giving string if it already ends with it.
      *
      * @param  string  $name
-     * @param  string  $postFix
+     * @param  string  $fix
      *
      * @return string
      */
-    public static function removePostFixWith($name, $postFix = '/')
+    public static function removePostFixWith($name, $fix = '/')
     {
-        if (ends_with($name, $postFix)) {
-            return strstr($name, $postFix, true);
+        $position = strripos($name, $fix);
+
+        if ($position !== false) {
+            return substr($name, 0, $position);
         }
 
         return $name;
@@ -331,14 +415,14 @@ class Helpers
      * Adds a postFix string at the end of another giving string if it does not already ends with it.
      *
      * @param  string  $name
-     * @param  string  $postFix
+     * @param  string  $fix
      *
      * @return string
      */
-    public static function postFixWith($name, $postFix = '/')
+    public static function postFixWith($name, $fix = '/')
     {
-        if (!ends_with($name, $postFix)) {
-            return $name . $postFix;
+        if (!ends_with($name, $fix)) {
+            return $name . $fix;
         }
 
         return $name;
@@ -348,14 +432,14 @@ class Helpers
      * Adds a preFix string at the begining of another giving string if it does not already ends with it.
      *
      * @param  string  $name
-     * @param  string  $preFix
+     * @param  string  $fix
      *
      * @return string
      */
-    public static function preFixWith($name, $preFix = '/')
+    public static function preFixWith($name, $fix = '/')
     {
-        if (!starts_with($name, $preFix)) {
-            return $preFix . $name;
+        if (!starts_with($name, $fix)) {
+            return $fix . $name;
         }
 
         return $name;
@@ -370,7 +454,7 @@ class Helpers
      */
     public static function getPathWithSlash($path)
     {
-        return self::postFixWith($path, '/');
+        return self::postFixWith($path, DIRECTORY_SEPARATOR);
     }
 
     /**
@@ -406,7 +490,7 @@ class Helpers
     {
         return array_map(function ($item) use ($wrapper) {
             $item = str_replace($wrapper, '\\' . $wrapper, trim($item, $wrapper));
-            
+
             return sprintf('%s%s%s', $wrapper, $item, $wrapper);
         }, $items);
     }
@@ -424,6 +508,9 @@ class Helpers
     /**
      * It splits a giving string by a giving seperator after trimming each part
      * from whitespaces and single/double quotes. Any empty string is eliminated.
+     *
+     * @param string $str
+     * @param string $seperator
      *
      * @return array
      */

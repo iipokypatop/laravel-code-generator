@@ -3,7 +3,8 @@
 namespace [% class_namespace %];
 
 use Illuminate\Foundation\Http\FormRequest;
-[% use_auth_namespace %]
+[% use_command_placeholder %]
+
 class [% form_request_class %] extends FormRequest
 {
     /**
@@ -23,9 +24,11 @@ class [% form_request_class %] extends FormRequest
      */
     public function rules()
     {
-        return [
+        $rules = [
     [% validation_rules %]
         ];
+[% file_validation_snippet %]
+        return $rules;
     }
 [% get_data_method %]
 [% upload_method %]

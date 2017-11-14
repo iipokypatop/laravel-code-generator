@@ -1,20 +1,20 @@
 <?php
 
-namespace CrestApps\CodeGenerator\Support;
+namespace CrestApps\CodeGenerator\Commands\Bases;
 
-use Exception;
-use Illuminate\Console\Command;
-use CrestApps\CodeGenerator\Traits\CommonCommand;
-use CrestApps\CodeGenerator\Support\Config;
-use CrestApps\CodeGenerator\Traits\GeneratorReplacers;
-use CrestApps\CodeGenerator\Models\ViewInput;
 use CrestApps\CodeGenerator\HtmlGenerators\LaravelCollectiveHtml;
 use CrestApps\CodeGenerator\HtmlGenerators\StandardHtml;
+use CrestApps\CodeGenerator\Models\ViewInput;
+use CrestApps\CodeGenerator\Support\Config;
+use CrestApps\CodeGenerator\Support\Helpers;
 use CrestApps\CodeGenerator\Support\ViewLabelsGenerator;
+use CrestApps\CodeGenerator\Traits\CommonCommand;
+use CrestApps\CodeGenerator\Traits\GeneratorReplacers;
+use Illuminate\Console\Command;
 
-abstract class ViewsCommand extends Command
+abstract class ViewsCommandBase extends Command
 {
-    use CommonCommand,  GeneratorReplacers;
+    use CommonCommand, GeneratorReplacers;
 
     /**
      * Gets the name of the stub to process.
@@ -115,17 +115,15 @@ abstract class ViewsCommand extends Command
      */
     protected function replaceCommonTemplates(&$stub, ViewInput $input, array $fields)
     {
-        $viewLabels = new ViewLabelsGenerator($input->modelName, $this->isCollectiveTemplate());
+        $viewLabels = new ViewLabelsGenerator($input->modelName, $fields, $this->isCollectiveTemplate());
 
-        $languages = array_keys(Helpers::getLanguageItems($fields));
-
-        $standardLabels = $viewLabels->getLabels($languages);
+        $standardLabels = $viewLabels->getLabels();
 
         $this->replaceModelName($stub, $input->modelName)
-             ->replaceRouteNames($stub, $this->getModelName($input->modelName), $input->prefix)
-             ->replaceViewNames($stub, $input->viewsDirectory, $input->prefix)
-             ->replaceLayoutName($stub, $input->layout)
-             ->replaceStandardLabels($stub, $standardLabels);
+            ->replaceRouteNames($stub, $this->getModelName($input->modelName), $input->prefix)
+            ->replaceViewNames($stub, $input->viewsDirectory, $input->prefix)
+            ->replaceLayoutName($stub, $input->layout)
+            ->replaceStandardLabels($stub, $standardLabels);
 
         return $this;
     }
@@ -141,7 +139,7 @@ abstract class ViewsCommand extends Command
      */
     protected function canCreateView($file, $force, array $fields = null)
     {
-        if ($this->alreadyExists($file) && ! $force) {
+        if ($this->alreadyExists($file) && !$force) {
             $this->error($this->getViewNameFromFile($file) . ' view already exists.');
             return false;
         }
@@ -160,6 +158,32 @@ abstract class ViewsCommand extends Command
     }
 
     /**
+     * Replace the create_form_id
+     *
+     * @param string $stub
+     * @param string $name
+     *
+     * @return $this
+     */
+    protected function replaceFormId(&$stub, $name)
+    {
+        return $this->replaceTemplate('form_id', $name, $stub);
+    }
+
+    /**
+     * Replace the create_form_name
+     *
+     * @param string $stub
+     * @param string $name
+     *
+     * @return $this
+     */
+    protected function replaceFormName(&$stub, $name)
+    {
+        return $this->replaceTemplate('form_name', $name, $stub);
+    }
+
+    /**
      * Get the view's name of a giving file.
      *
      * @param string $fillname
@@ -174,32 +198,6 @@ abstract class ViewsCommand extends Command
     }
 
     /**
-     * It Replaces the templates of the givin $labels
-     *
-     * @param string $stub
-     * @param array $items
-     *
-     * @return $this
-     */
-    protected function replaceStandardLabels(&$stub, array $items)
-    {
-        foreach ($items as $labels) {
-            foreach ($labels as $label) {
-
-                $text = $label->isPlain ? $label->text : sprintf("{{ trans('%s') }}", $label->localeGroup);
-                
-                if ($label->isInFunction) {
-                    $text = $label->isPlain ? sprintf("'%s'", $label->text) : sprintf("trans('%s')", $label->localeGroup);
-                }
-
-                $stub = $this->strReplace($label->template, $text, $stub);
-            }
-        }
-
-        return $this;
-    }
-
-    /**
      * It Replaces the layout name in a giving stub
      *
      * @param string $stub
@@ -209,9 +207,7 @@ abstract class ViewsCommand extends Command
      */
     protected function replaceLayoutName(&$stub, $layout)
     {
-        $stub = $this->strReplace('layout_name', $layout, $stub);
-
-        return $this;
+        return $this->replaceTemplate('layout_name', $layout, $stub);
     }
 
     /**
@@ -226,9 +222,7 @@ abstract class ViewsCommand extends Command
     {
         $code = $this->containsfile($fields) ? $this->getFileUploadAttribute($this->getTemplateName()) : '';
 
-        $stub = $this->strReplace('upload_files', $code, $stub);
-
-        return $this;
+        return $this->replaceTemplate('upload_files', $code, $stub);
     }
 
     /**
@@ -296,20 +290,19 @@ abstract class ViewsCommand extends Command
      *
      * @param string $langFile
      * @param string $fields
-     * @param string $fieldsFile
+     * @param string $resourceFile
      * @param string $modelName
      *
      * @return $this
      */
-    protected function createLanguageFile($langFile, $fields, $fieldsFile, $modelName)
+    protected function createLanguageFile($langFile, $resourceFile, $modelName)
     {
         $this->callSilent('create:language', [
-                                'model-name'           => $modelName,
-                                '--language-file-name' => $langFile,
-                                '--fields'             => $fields,
-                                '--fields-file'        => $fieldsFile,
-                                '--template-name'      => $this->getTemplateName()
-                           ]);
+            'model-name' => $modelName,
+            '--language-filename' => $langFile,
+            '--resource-file' => $resourceFile,
+            '--template-name' => $this->getTemplateName(),
+        ]);
         return $this;
     }
 
@@ -323,7 +316,7 @@ abstract class ViewsCommand extends Command
      */
     protected function getFullViewsPath($viewsDirectory, $routesPrefix)
     {
-        $path = !empty($routesPrefix) ? Helpers::getPathWithSlash(str_replace('.','-', $routesPrefix)) : '';
+        $path = !empty($routesPrefix) ? Helpers::getPathWithSlash(str_replace('.', '-', $routesPrefix)) : '';
 
         if (!empty($viewsDirectory)) {
             $path .= Helpers::getPathWithSlash($viewsDirectory);
@@ -358,7 +351,7 @@ abstract class ViewsCommand extends Command
     {
         $field = $this->getHeaderField($fields);
 
-        return ! is_null($field) ? sprintf('$%s->%s', $this->getSingularVariable($modelName), $field->name) : '$title';
+        return !is_null($field) ? sprintf('$%s->%s', $this->getSingularVariable($modelName), $field->name) : '$title';
     }
 
     /**
@@ -387,10 +380,8 @@ abstract class ViewsCommand extends Command
      *
      * @return $this
      */
-    protected function replaceModelHeader(& $stub, $title)
+    protected function replaceModelHeader(&$stub, $title)
     {
-        $stub = $this->strReplace('model_header', $title, $stub);
-
-        return $this;
+        return $this->replaceTemplate('model_header', $title, $stub);
     }
 }
