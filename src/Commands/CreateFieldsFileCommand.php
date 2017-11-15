@@ -40,7 +40,7 @@ class CreateFieldsFileCommand extends Command
      *
      * @var array
      */
-    protected $drivers = ['mysql'];
+    protected $drivers = ['mysql', 'pgsql'];
 
     /**
      * Execute the console command.

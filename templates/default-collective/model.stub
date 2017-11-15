@@ -6,6 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 [% use_soft_delete %]
 class [% model_name_class %] extends Model
 {
+
+    public $timestamps = false;
+
     [% use_soft_delete_trait %]
 [% time_stamps %]
     /**

@@ -29,7 +29,8 @@ class PgsqlParser extends \CrestApps\CodeGenerator\DatabaseParsers\ParserBase
 
         $q = <<<SQL
 SELECT
-       COLUMN_NAME as COLUMN_NAME
+       
+       COLUMN_NAME AS COLUMN_NAME
       ,COLUMN_DEFAULT
       ,UPPER(IS_NULLABLE)  AS IS_NULLABLE
       ,LOWER(DATA_TYPE) AS DATA_TYPE
@@ -37,12 +38,12 @@ SELECT
       --,UPPER(COLUMN_KEY) AS COLUMN_KEY  
       ,'' AS COLUMN_KEY
       ,'' AS EXTRA
-      ,'' as COLUMN_COMMENT
-      ,data_type as COLUMN_TYPE
+      ,'' AS COLUMN_COMMENT
+      ,data_type AS COLUMN_TYPE
       FROM INFORMATION_SCHEMA.COLUMNS
       -- WHERE TABLE_NAME = 'project' AND TABLE_SCHEMA = 'pepsico_uws'
           WHERE TABLE_NAME = ? AND TABLE_CATALOG = ?
-      
+      order by ordinal_position asc
       
       
 SQL;
@@ -63,34 +64,34 @@ SQL;
     {
         $collection = [];
 
-
-
         foreach ($columns as $column) {
-
-            //var_export($column);die;
 
             $properties['name'] = $column->column_name;
             $properties['labels'] = $this->getLabel($column->column_name);
-            $properties['is-nullable'] = ($column->is_nullable == 'yes');
+            $properties['is-nullable'] = ($column->is_nullable == strtolower('yes'));
             $properties['data-value'] = $column->column_default;
             $properties['data-type'] = $this->getDataType($column->data_type);
             $properties['data-type-params'] = $this->getPrecision($column->character_maximum_length, $column->data_type, $column->column_type);
-
             $properties['is-primary'] = ($column->column_name == 'id');
-
             $properties['is-index'] = false;
-
             $properties['is-unique'] = ($column->column_name == 'id');
-            $properties['is-auto-increment'] = ($column->column_name == 'id');
-
+            $properties['is-auto-increment'] = strpos($column->column_default, 'nextval(') === 0;
             $properties['comment'] = $column->column_comment ?: null;
             ///$properties['options'] = $this->gethtmloptions($column->data_type, $column->column_type); //????
             $properties['options'] = [];
             $properties['is-unsigned'] = (stripos($column->column_type, 'unsigned') !== false);
-            //$properties['html-type'] = $this->gethtmltype($column->data_type);
-            $properties['html-type'] = 'string';
+            $properties['html-type'] = $this->gethtmltype($column->data_type);
+            ///$properties['html-type'] = 'string';
 
-            $properties['foreign-constraint'] = null;
+
+            if ($this->isInRelationIgnore($this->tableName, $column->column_name)) {
+                $properties['is-foreign-relation'] = false;
+            }
+
+            if (!$this->isInRelationIgnore($this->tableName, $column->column_name)) {
+                $properties['foreign-constraint'] = $this->getForeignConstraint($column->column_name);
+            }
+
 
             if (intval($column->character_maximum_length) > 255
                 || in_array($column->data_type, ['varbinary', 'blob', 'mediumblob', 'longblob', 'text', 'mediumtext', 'longtext'])
@@ -104,8 +105,7 @@ SQL;
 
         $fields = FieldTransformer::fromArray($collection, $localegroup);
 
-       # var_export($fields);die;
-        
+
         return $fields;
     }
 
@@ -121,8 +121,8 @@ SQL;
         $map = Config::dataTypeMap();
 
         if (!array_key_exists($type, $map)) {
-            echo "####$type####\n";
-            throw new Exception("The type " . $type . " is not mapped in the 'eloquent_type_to_method' key in the config file.");
+
+            throw new \Exception("The type " . $type . " is not mapped in the 'eloquent_type_to_method' key in the config file.");
         }
 
         return $map[$type];
@@ -140,15 +140,15 @@ SQL;
     protected function getPrecision($length, $dataType, $columnType)
     {
         if (in_array($dataType, ['decimal', 'double', 'float', 'real'])) {
-            $match = [];
+//            $match = [];
+//
+//            preg_match('#\((.*?)\)#', $columnType, $match);
+//
+//            if (!isset($match[1])) {
+//                return null;
+//            }
 
-            preg_match('#\((.*?)\)#', $columnType, $match);
-
-            if (!isset($match[1])) {
-                return null;
-            }
-
-            return explode(',', $match[1]);
+            return [30,10];
         }
 
         if (intval($length) > 0) {
@@ -157,6 +157,8 @@ SQL;
 
         return [];
     }
+
+
 
     /**
      * Set the options for a giving field.
@@ -284,22 +286,54 @@ SQL;
      */
     protected function getConstraints()
     {
+        $q = <<<SQL
+SELECT
+    tc.constraint_name, 
+    tc.table_name AS "table_name", 
+    kcu.column_name AS "foreign", 
+    ccu.table_name AS "references" , --foreign_table_name,
+    ccu.column_name AS "on" , --foreign_column_name 
+    NULL AS "onUpdate",
+    NULL AS "onDelete"
+    
+FROM 
+    information_schema.table_constraints AS tc 
+    JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name
+    JOIN information_schema.constraint_column_usage AS ccu  ON ccu.constraint_name = tc.constraint_name
+WHERE 
+  constraint_type = 'FOREIGN KEY'
+  AND tc.table_name = ? AND tc.table_catalog    = ? 
+SQL;
+
         if (is_null($this->constrains)) {
-            $this->constrains = DB::select('SELECT 
-                                            r.referenced_table_name AS `REFERENCES`
-                                           ,r.CONSTRAINT_NAME AS `NAME`
-                                           ,r.UPDATE_RULE AS `onUpdate`
-                                           ,r.DELETE_RULE AS `onDelete`
-                                           ,u.referenced_column_name AS `ON`
-                                           ,u.column_name AS `FOREIGN`
-                                           FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS AS r
-                                           INNER JOIN information_schema.key_column_usage AS u ON u.CONSTRAINT_NAME = r.CONSTRAINT_NAME
-                                                                                               AND u.table_schema = r.constraint_schema
-                                                                                               AND u.table_name = r.table_name
-                                           WHERE u.table_name = ? AND u.constraint_schema = ?;',
-                [$this->tableName, $this->databaseName]);
+            $this->constrains = DB::select(
+                $q,
+                [
+                    $this->tableName,
+                    $this->databaseName
+                ]
+            );
         }
 
         return $this->constrains;
+    }
+
+    protected function isInRelationIgnore($table_name, $field_name)
+    {
+        $ignore_foreign_constraint = config('codegenerator.ignore_foreign_constraint', []);
+
+        if (empty($ignore_foreign_constraint)) {
+            return false;
+        }
+
+        if (
+            !empty($ignore_foreign_constraint[$table_name])
+            && is_array($ignore_foreign_constraint[$table_name])
+            && in_array($field_name, $ignore_foreign_constraint[$table_name], true)
+        ) {
+            return true;
+        }
+
+        return false;
     }
 }

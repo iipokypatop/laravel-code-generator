@@ -210,11 +210,18 @@ class FieldOptimizer
     */
     protected function optimizePrimaryKey()
     {
+
+        $this->field->isOnFormView = true;
+        $this->field->isOnIndexView = true;
+        $this->field->isOnShowView = true;
+
+
+
+            return $this;
+
         if ($this->field->isPrimary()) {
             if ($this->meta == null) {
-                $this->field->isOnFormView = false;
-                $this->field->isOnIndexView = false;
-                $this->field->isOnShowView = false;
+
 
                 return $this;
             }

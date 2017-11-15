@@ -142,7 +142,7 @@ class SqlServerParser extends ParserBase
     {
         if (strpos($type, 'unsigned') !== false) {
             $field->isUnsigned = true;
-            $field->validationRules[] = sprintf('min:%s', 0);
+            //$field->validationRules[] = sprintf('min:%s', 0);
         }
 
         return $this;

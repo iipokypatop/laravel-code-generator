@@ -474,7 +474,7 @@ class FieldTransformer
         }
 
         if (in_array($type, ['decimal','double','float']) && isset($params[0]) && ($length = intval($params[0])) > 0 && isset($params[1]) && ($decimal = intval($params[1])) > 0) {
-            return [$length, $decimal];
+            return [];
         }
 
         if ($type == 'enum') {
@@ -770,11 +770,11 @@ class FieldTransformer
             }
 
             if (!$this->inArraySearch($field->validationRules, 'min')) {
-                $field->validationRules[] = sprintf('min:%s', $field->getMinLength());
+                //$field->validationRules[] = sprintf('min:%s', $field->getMinLength());
             }
 
             if (!$this->inArraySearch($field->validationRules, 'max') && !is_null($field->getMaxLength())) {
-                $field->validationRules[] = sprintf('max:%s', $field->getMaxLength());
+                // $field->validationRules[] = sprintf('max:%s', $field->getMaxLength());
             }
         }
 
@@ -792,11 +792,11 @@ class FieldTransformer
             }
 
             if (!$this->inArraySearch($field->validationRules, 'min') && !is_null($minValue = $field->getMinValue())) {
-                $field->validationRules[] = sprintf('min:%s', $minValue);
+                //$field->validationRules[] = sprintf('min:%s', $minValue);
             }
 
             if (!$this->inArraySearch($field->validationRules, 'max') && !is_null($maxValue = $field->getMaxValue())) {
-                $field->validationRules[] = sprintf('max:%s', $maxValue);
+                //$field->validationRules[] = sprintf('max:%s', $maxValue);
             }
         }
 

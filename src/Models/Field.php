@@ -1011,15 +1011,32 @@ class Field
      */
     public function getMinValue()
     {
-        if ($this->isUnsigned) {
-            return 0;
+        if (! $this->isNumeric()) {
+            return null;
         }
 
-        if (! is_null($value = $this->getMaxValue())) {
-            return ($value * -1) - ($this->isDecimal() ? 0: 1);
+        if ($this->isDecimal()) {
+            $length = $this->getMethodParam(0) ?: 1;
+            $declimal = $this->getMethodParam(1) ?: 0;
+            $max = str_repeat('9', $length);
+
+            if ($declimal > 0) {
+                $max = substr_replace($max, '.', $declimal * -1, 0);
+            }
+            $max = floatval($max);
+        } elseif ($this->dataType == 'integer') {
+            $max = $this->isUnsigned ? 4294967295 : 2147483647;
+        } elseif ($this->dataType == 'mediumInteger') {
+            $max = $this->isUnsigned ? 16777215 : 8388607;
+        } elseif ($this->dataType == 'smallInteger') {
+            $max = $this->isUnsigned ? 65535 : 32767;
+        } elseif ($this->dataType == 'tinyInteger') {
+            $max = $this->isUnsigned ? 255 : 127;
+        } elseif ($this->dataType == 'bigInteger') {
+            $max = $this->isUnsigned ? 18446744073709551615 : 9223372036854775807;
         }
 
-        return null;
+        return -$max;
     }
 
     /**

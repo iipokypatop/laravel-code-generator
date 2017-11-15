@@ -65,7 +65,7 @@ class CreateModelCommand extends Command
         $input = $this->getCommandInput();
 
         $fields = $this->getFields($input->fields, 'model', $input->fieldsFile);
-        
+
         if ($input->useSoftDelete) {
             $fields = $this->upsertDeletedAt($fields);
         }
